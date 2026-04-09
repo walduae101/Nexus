@@ -30,6 +30,7 @@ export interface GlobalDefaults {
   customInstructions: string;
   complexityMode: string;
   spokenLanguage: string;
+  hasCompletedOnboarding?: boolean;
 }
 
 interface SettingsContextType {
@@ -91,7 +92,8 @@ export const SettingsProvider: React.FC<{ user: User | null; children: React.Rea
       targetIde: 'VS Code',
       customInstructions: '',
       complexityMode: 'premade-specific',
-      spokenLanguage: 'en-US'
+      spokenLanguage: 'en-US',
+      hasCompletedOnboarding: false
     };
   });
 

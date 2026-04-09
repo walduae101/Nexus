@@ -108,6 +108,14 @@ const en = {
     "advanced": "ADVANCED",
     "custom": "CUSTOM",
 
+    // Onboarding Wizard
+    "welcome_to_nexus": "Welcome to Nexus",
+    "step_indicator": "Step {1} of {2}",
+    "spoken_language_desc": "The native language you will be speaking into the microphone.",
+    "next": "Next",
+    "back": "Back",
+    "launch_nexus": "Launch Nexus",
+
     // UI Additions
     "premade": "PREMADE",
     "new_session": "New Session",
@@ -231,6 +239,14 @@ const ar = {
     "specific": "دقيق",
     "advanced": "مُتقدم",
     "custom": "مُخصص",
+
+    // Onboarding Wizard
+    "welcome_to_nexus": "مرحباً بك في Nexus",
+    "step_indicator": "الخطوة {1} من {2}",
+    "spoken_language_desc": "اللغة الأم التي ستتحدث بها عبر الميكروفون.",
+    "next": "التالي",
+    "back": "رجوع",
+    "launch_nexus": "بدء الاستخدام",
 
     // UI Additions
     "premade": "مُعَد مسبقاً",

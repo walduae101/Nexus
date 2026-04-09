@@ -15,9 +15,10 @@ import {
   DropdownMenuTrigger,
 } from "./components/ui/dropdown-menu";
 
-import { SettingsProvider } from './contexts/SettingsContext';
-
+import { SettingsProvider, useSettings } from './contexts/SettingsContext';
+import { OnboardingWizard } from './components/OnboardingWizard';
 import { GlobalSettings } from './components/GlobalSettings';
+import { TooltipProvider } from './components/ui/tooltip';
 
 function AppContent() {
   const [user, setUser] = useState<User | null>(null);
@@ -89,6 +90,17 @@ function AppContent() {
 
   return (
     <SettingsProvider user={user}>
+      <NexusWorkspace user={user} isSidebarOpen={isSidebarOpen} setIsSidebarOpen={setIsSidebarOpen} signOut={signOut} auth={auth} t={t} i18n={i18n} />
+    </SettingsProvider>
+  );
+}
+
+function NexusWorkspace({ user, isSidebarOpen, setIsSidebarOpen, signOut, auth, t, i18n }: any) {
+  const { globalDefaults } = useSettings();
+
+  return (
+    <>
+      {globalDefaults && globalDefaults.hasCompletedOnboarding === false && <OnboardingWizard />}
       <div className="flex h-screen bg-background text-foreground overflow-hidden">
         <div className="flex flex-col w-full max-w-7xl mx-auto">
           <header className="flex items-center justify-between p-4 border-b border-zinc-800/50 bg-card/50">
@@ -133,11 +145,9 @@ function AppContent() {
           </main>
         </div>
       </div>
-    </SettingsProvider>
+    </>
   );
 }
-
-import { TooltipProvider } from './components/ui/tooltip';
 
 export default function App() {
   return (
