@@ -29,6 +29,7 @@ export interface GlobalDefaults {
   targetIde: string;
   customInstructions: string;
   complexityMode: string;
+  spokenLanguage: string;
 }
 
 interface SettingsContextType {
@@ -79,13 +80,30 @@ export const SettingsProvider: React.FC<{ user: User | null; children: React.Rea
   const [savedIdes, setSavedIdes] = useState<SavedItem[]>([]);
   const [savedInstructions, setSavedInstructions] = useState<SavedInstruction[]>([]);
   const [customModes, setCustomModes] = useState<CustomMode[]>(PREMADE_MODES);
-  const [globalDefaults, setGlobalDefaults] = useState<GlobalDefaults>({
-    userLang: 'en-US',
-    ideLang: 'en-US',
-    targetIde: 'VS Code',
-    customInstructions: '',
-    complexityMode: 'premade-specific'
+  const [globalDefaults, setGlobalDefaults] = useState<GlobalDefaults>(() => {
+    try {
+      const stored = localStorage.getItem('nexus_user_settings');
+      if (stored) return JSON.parse(stored);
+    } catch {}
+    return {
+      userLang: 'en-US',
+      ideLang: 'en-US',
+      targetIde: 'VS Code',
+      customInstructions: '',
+      complexityMode: 'premade-specific',
+      spokenLanguage: 'en-US'
+    };
   });
+
+  useEffect(() => {
+    import('../lib/i18n').then(({ default: i18n }) => {
+      const lang = globalDefaults.userLang.startsWith('ar') ? 'ar' : 'en';
+      if (i18n.language !== lang) {
+        i18n.changeLanguage(lang);
+      }
+      document.documentElement.dir = lang === 'ar' ? 'rtl' : 'ltr';
+    });
+  }, [globalDefaults.userLang]);
 
   useEffect(() => {
     if (!user) return;
@@ -118,7 +136,12 @@ export const SettingsProvider: React.FC<{ user: User | null; children: React.Rea
     const defaultsRef = doc(db, `users/${user.uid}/global_defaults/default`);
     const unsubDefaults = onSnapshot(defaultsRef, (docSnap) => {
       if (docSnap.exists()) {
-        setGlobalDefaults(prev => ({ ...prev, ...docSnap.data() }));
+        const fetchedData = docSnap.data() as GlobalDefaults;
+        setGlobalDefaults(prev => {
+          const merged = { ...prev, ...fetchedData };
+          localStorage.setItem('nexus_user_settings', JSON.stringify(merged));
+          return merged;
+        });
       }
     }, (error) => handleFirestoreError(error, OperationType.GET, `users/${user.uid}/global_defaults/default`));
 
@@ -172,8 +195,18 @@ export const SettingsProvider: React.FC<{ user: User | null; children: React.Rea
   };
 
   const updateGlobalDefaults = async (defaults: Partial<GlobalDefaults>) => {
+    setGlobalDefaults(prev => {
+      const updated = { ...prev, ...defaults };
+      localStorage.setItem('nexus_user_settings', JSON.stringify(updated));
+      return updated;
+    });
+    
     if (!user) return;
-    await setDoc(doc(db, `users/${user.uid}/global_defaults/default`), defaults, { merge: true });
+    try {
+      await setDoc(doc(db, `users/${user.uid}/global_defaults/default`), defaults, { merge: true });
+    } catch (e) {
+      console.error("Failed to sync defaults to Cloud:", e);
+    }
   };
 
   return (

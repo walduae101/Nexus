@@ -69,7 +69,12 @@ export async function chatWithNexus(
   let dynamicInstruction = SYSTEM_INSTRUCTION;
   if (settings) {
     dynamicInstruction += `\n\n**ACTIVE SETTINGS:**\n`;
-    if (settings.userLang) dynamicInstruction += `- [User_Lang]: ${settings.userLang}\n`;
+    if (settings.userLang) {
+      dynamicInstruction += `- [User_Lang]: ${settings.userLang}\n`;
+      if (settings.userLang === 'ar-AE') {
+        dynamicInstruction += `CRITICAL INSTRUCTION: You MUST generate your entire response using the authentic Emirati dialect (اللهجة الإماراتية المحلية), avoiding purely formal Modern Standard Arabic (الفصحى) where natural conversational phrasing is appropriate.\n`;
+      }
+    }
     if (settings.ideLang) dynamicInstruction += `- [IDE_Lang]: ${settings.ideLang}\n`;
     if (settings.targetIde) dynamicInstruction += `- [Target_IDE]: ${settings.targetIde}\n`;
     if (settings.customInstructions) dynamicInstruction += `- [Custom_Instructions]: ${settings.customInstructions}\n`;
@@ -150,21 +155,67 @@ export async function searchGrounding(query: string) {
 
 export async function textToSpeech(text: string) {
   const response = await ai.models.generateContent({
-    model: 'gemini-2.5-flash-preview-tts',
+    model: 'gemini-2.5-pro-preview-tts',
     contents: [{ parts: [{ text }] }],
     config: {
       responseModalities: [Modality.AUDIO],
       speechConfig: {
         voiceConfig: {
-          prebuiltVoiceConfig: { voiceName: 'Kore' }
+          prebuiltVoiceConfig: { voiceName: 'Enceladus' }
         }
       }
     }
   });
 
-  const base64Audio = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
-  if (base64Audio) {
-    return `data:audio/wav;base64,${base64Audio}`;
+  const inlineData = response.candidates?.[0]?.content?.parts?.[0]?.inlineData;
+  if (inlineData?.data) {
+    if (inlineData.mimeType?.includes('pcm')) {
+      // 2.5-pro outputs raw 16-bit PCM. Browser <audio> elements strictly reject this without a RIFF header.
+      // We must sequentially inject a 44-byte WAV architecture container!
+      const binaryString = window.atob(inlineData.data);
+      const pcmBytes = new Uint8Array(binaryString.length);
+      for (let i = 0; i < binaryString.length; i++) {
+        pcmBytes[i] = binaryString.charCodeAt(i);
+      }
+      
+      const sampleRate = 24000;
+      const numChannels = 1;
+      const byteRate = sampleRate * numChannels * 2;
+      const blockAlign = numChannels * 2;
+      const dataSize = pcmBytes.length;
+      
+      const wavBuffer = new ArrayBuffer(44 + dataSize);
+      const view = new DataView(wavBuffer);
+      
+      const writeStr = (offset: number, str: string) => {
+        for (let i = 0; i < str.length; i++) view.setUint8(offset + i, str.charCodeAt(i));
+      };
+      
+      writeStr(0, 'RIFF');
+      view.setUint32(4, 36 + dataSize, true);
+      writeStr(8, 'WAVE');
+      writeStr(12, 'fmt ');
+      view.setUint32(16, 16, true);
+      view.setUint16(20, 1, true);
+      view.setUint16(22, numChannels, true);
+      view.setUint32(24, sampleRate, true);
+      view.setUint32(28, byteRate, true);
+      view.setUint16(32, blockAlign, true);
+      view.setUint16(34, 16, true);
+      writeStr(36, 'data');
+      view.setUint32(40, dataSize, true);
+      new Uint8Array(wavBuffer, 44).set(pcmBytes);
+      
+      let base64Wav = '';
+      const wavBytes = new Uint8Array(wavBuffer);
+      for (let i = 0; i < wavBytes.byteLength; i++) {
+        base64Wav += String.fromCharCode(wavBytes[i]);
+      }
+      return `data:audio/wav;base64,${window.btoa(base64Wav)}`;
+    }
+    
+    // Fallback if the payload is natively generated as an mp3 or wav
+    return `data:${inlineData.mimeType || 'audio/wav'};base64,${inlineData.data}`;
   }
   throw new Error('No audio generated');
 }

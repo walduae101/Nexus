@@ -173,7 +173,10 @@ service cloud.firestore {
       allow delete: if isAuthenticated() && isOwner(resource.data.userId);
 
       match /messages/{messageId} {
-        allow read: if isAuthenticated() && isOwner(get(/databases/$(database)/documents/chatSessions/$(sessionId)).data.userId);
+        allow read: if isAuthenticated() && (
+                      !exists(/databases/$(database)/documents/chatSessions/$(sessionId)) ||
+                      isOwner(get(/databases/$(database)/documents/chatSessions/$(sessionId)).data.userId)
+                    );
         allow create: if isAuthenticated() && isValidChatMessage(request.resource.data) &&
                       isOwner(request.resource.data.userId) &&
                       request.resource.data.sessionId == sessionId &&
