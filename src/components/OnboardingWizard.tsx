@@ -26,7 +26,7 @@ export function OnboardingWizard() {
   const handleLaunch = () => updateGlobalDefaults({ hasCompletedOnboarding: true });
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-background/95 backdrop-blur-md p-4 pointer-events-auto">
+    <div className="fixed inset-0 z-40 flex items-center justify-center bg-background/95 backdrop-blur-md p-4 pointer-events-auto">
       <Card className="w-full max-w-lg bg-card border-zinc-800 shadow-2xl relative overflow-hidden">
         
         {/* Progress Bar Header */}
@@ -69,7 +69,7 @@ export function OnboardingWizard() {
                         {globalDefaults.userLang ? getLanguageName(globalDefaults.userLang) : t('select_user_language')}
                       </SelectValue>
                     </SelectTrigger>
-                    <SelectContent position="popper" className="z-[9999] bg-popover border-border text-popover-foreground">
+                    <SelectContent className="bg-popover border-border text-popover-foreground">
                       <SelectGroup>
                         <SelectLabel>{t('official_languages')}</SelectLabel>
                         {savedLanguages.filter(lang => lang.isDefault).map(lang => (
@@ -102,7 +102,7 @@ export function OnboardingWizard() {
                         {globalDefaults.spokenLanguage ? getLanguageName(globalDefaults.spokenLanguage) : t('spoken_language')}
                       </SelectValue>
                     </SelectTrigger>
-                    <SelectContent position="popper" className="z-[9999] bg-popover border-border text-popover-foreground">
+                    <SelectContent className="bg-popover border-border text-popover-foreground">
                       <SelectGroup>
                         <SelectLabel>{t('official_languages')}</SelectLabel>
                         {savedLanguages.filter(lang => lang.isDefault).map(lang => (
@@ -122,10 +122,10 @@ export function OnboardingWizard() {
                   >
                     <SelectTrigger className="bg-zinc-900/50 border-zinc-800 rounded-lg h-12">
                       <SelectValue placeholder={t('complexity_mode')}>
-                        {globalDefaults.complexityMode ? getModeName(globalDefaults.complexityMode) : t('complexity_mode')}
+                        {globalDefaults.complexityMode ? (t(getModeName(globalDefaults.complexityMode).toLowerCase()) || getModeName(globalDefaults.complexityMode)) : t('complexity_mode')}
                       </SelectValue>
                     </SelectTrigger>
-                    <SelectContent position="popper" className="z-[9999] bg-popover border-border text-popover-foreground">
+                    <SelectContent className="bg-popover border-border text-popover-foreground">
                       <SelectGroup>
                         <SelectLabel>{t('premade')}</SelectLabel>
                         {customModes.filter(mode => mode.isPremade).map(mode => (
