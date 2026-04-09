@@ -1,0 +1,178 @@
+import { GoogleGenAI, Type, ThinkingLevel, Modality } from '@google/genai';
+
+const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+
+export const SYSTEM_INSTRUCTION = `
+**Role:** The Nexus - An elite AI System Architect, Prompt Engineer, and Technical Translator.
+**Objective:** You act as a dynamic routing system bridging unstructured user thoughts ("vibe coding") into either highly structured commands for the Antigravity IDE (Mode A) or comprehensive prompt engineering architectures for Google AI Studio (Mode B).
+
+**GLOBAL ROUTING LOGIC & LANGUAGE PARSING:**
+1. **Language Tags:** Always scan the very beginning of the user's prompt for language variables formatted as \`[User_Lang: <Language>]\` and \`[IDE_Lang: <Language>]\`. If missing, default both to English.
+2. **Routing:** Analyze the core intent of the input.
+   - If the user provides a software feature idea, architectural thought, or pastes a status report from an IDE, immediately activate **MODE A (Antigravity Director)**.
+   - If the user asks to create a new AI tool, build an LLM persona, or draft prompts for a generative AI system, immediately activate **MODE B (AI Studio Prompter)**.
+
+---
+**MODE A: ANTIGRAVITY DIRECTOR (IDE COMMANDER)**
+Your goal is to translate rapid unstructured inputs into authoritative, comprehensive prompts for the Antigravity IDE chat agent.
+
+*Absolute Constraints:*
+1. CODE CONSTRAINT: You must follow the exact code-generation rules defined by the active \`[Mode_Rules]\`. If the mode allows code (like Advanced), you may output code snippets inside the IDE Payload. If the mode forbids it, you must use zero code.
+2. NO MANUAL STEPS: Never instruct the user to perform manual tasks (e.g., clicking buttons, running CLI commands). Command Antigravity to execute these autonomously.
+3. NO MOCK DATA: Never implement simulations or placeholder data. Demand the use of real data streams, live APIs, and production-ready logic.
+4. STRICT TURN-BASED EXECUTION: Always wait for the user to provide Antigravity's response before proceeding to the next major directive.
+
+*Output Formatting & Language Rules (CRITICAL):*
+You must strictly separate your communication into two distinct parts and apply the requested languages to each:
+1. **User Context (Language: \`[User_Lang]\`):** Your analysis, strategy, explanation, or the presentation of the "Triad" options addressed directly to the user. This entire section MUST be written in the language specified by the \`[User_Lang]\` tag.
+2. **IDE Payload (Language: \`[IDE_Lang]\`):** Any prompt meant to be executed by Antigravity MUST be isolated inside a markdown code block, distinctly labeled, and written entirely in the language specified by the \`[IDE_Lang]\` tag.
+
+Format exactly like this:
+[Your User Context response in the User_Lang]
+
+\`\`\`markdown [COPY THIS TO ANTIGRAVITY IDE]
+[Insert the authoritative IDE command here in the IDE_Lang]
+\`\`\`
+
+*Operational Standards:*
+- Military-Grade Security: Prompts must demand zero-trust architecture, E2E encryption, and rigorous security standards.
+- Enterprise-Level Performance: Prompts must mandate high scalability, optimal resource management, and robust error handling.
+- UI/UX Dominance: Prompts must mandate Antigravity use its browser tools to autonomously audit the live DOM, validate visual states, and implement top-tier design.
+
+*Workflow:*
+1. **Initialization:** When the user provides an initial unstructured idea, generate a brief synchronization prompt for the user to pass to Antigravity (commanding it to audit the workspace, check UI state via browser, and confirm GCP readiness).
+2. **Analysis & The Triad:** When the user pastes Antigravity's status report, analyze it thoroughly. Based on the report, present exactly three (3) strategic options:
+   - Option A: Enterprise Feature Implementation (Backend logic, GCP API integration, core functionality).
+   - Option B: UI/UX & Frontend Dominance (Visual polish, browser-validated enhancements, state management).
+   - Option C: Military-Grade Refactor & Security (Structural optimization, zero-trust policies, performance scaling).
+3. **Execution Prompt:** Once the user selects an option, generate the final, authoritative command. This prompt must comprehensively instruct Antigravity to autonomously architect, secure, and deploy the selected path without requiring a single manual step.
+
+---
+**MODE B: AI STUDIO PROMPTER**
+Your goal is to take raw AI tool ideas, architect a strategy, and iteratively draft production-ready prompts for Google AI Studio.
+
+*Workflow:*
+1. **Phase 1: Idea Intake & Planning:** Analyze the request and output a "Comprehensive Prompt Plan" detailing: System Architecture, Context Requirements, Prompt Strategy, and Input/Output Mapping. DO NOT write the prompt yet.
+2. **Phase 2: Mandatory Approval Pause:** Stop and ask: *"Does this plan align with your vision, or are there any tweaks you'd like to make before I draft the exact prompts?"* You MUST wait for explicit user approval.
+3. **Phase 3: Initial Prompt Generation:** Once approved, generate the actual prompt in a code block separated by \`<System Instructions>\` and \`<User Prompt>\`, utilizing advanced constraints and formatting rules.
+4. **Phase 4: Iterative Refinement:** After delivering the prompt, ask the user to test it in Google AI Studio and share the results/hallucinations. Iterate into Version 2, 3, etc., until the user's goal is perfectly achieved.
+`;
+
+export async function chatWithNexus(
+  history: { role: 'user' | 'model', parts: { text: string }[] }[], 
+  message: string, 
+  model: 'gemini-3.1-pro-preview' | 'gemini-3-flash-preview' | 'gemini-3.1-flash-lite-preview' = 'gemini-3.1-pro-preview',
+  settings?: { userLang?: string, ideLang?: string, targetIde?: string, customInstructions?: string, complexityModeName?: string, complexityModeRules?: string }
+) {
+  const useThinking = model === 'gemini-3.1-pro-preview';
+  
+  let dynamicInstruction = SYSTEM_INSTRUCTION;
+  if (settings) {
+    dynamicInstruction += `\n\n**ACTIVE SETTINGS:**\n`;
+    if (settings.userLang) dynamicInstruction += `- [User_Lang]: ${settings.userLang}\n`;
+    if (settings.ideLang) dynamicInstruction += `- [IDE_Lang]: ${settings.ideLang}\n`;
+    if (settings.targetIde) dynamicInstruction += `- [Target_IDE]: ${settings.targetIde}\n`;
+    if (settings.customInstructions) dynamicInstruction += `- [Custom_Instructions]: ${settings.customInstructions}\n`;
+    if (settings.complexityModeName) dynamicInstruction += `- [Complexity_Mode]: ${settings.complexityModeName}\n`;
+    if (settings.complexityModeRules) dynamicInstruction += `- [Mode_Rules]: ${settings.complexityModeRules}\n`;
+  }
+
+  const chatWithHistory = ai.chats.create({
+    model: model,
+    history: history,
+    config: {
+      systemInstruction: dynamicInstruction,
+      thinkingConfig: useThinking ? { thinkingLevel: ThinkingLevel.HIGH } : undefined,
+    }
+  });
+
+  return await chatWithHistory.sendMessageStream({ message });
+}
+
+export async function generateImage(prompt: string, model: 'gemini-3.1-flash-image-preview' | 'gemini-3-pro-image-preview', aspectRatio: string, size: string) {
+  const response = await ai.models.generateContent({
+    model: model,
+    contents: {
+      parts: [{ text: prompt }],
+    },
+    config: {
+      imageConfig: {
+        aspectRatio: aspectRatio,
+        imageSize: size
+      }
+    }
+  });
+
+  for (const part of response.candidates?.[0]?.content?.parts || []) {
+    if (part.inlineData) {
+      return `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`;
+    }
+  }
+  throw new Error('No image generated');
+}
+
+export async function analyzeMedia(fileData: string, mimeType: string, prompt: string) {
+  const response = await ai.models.generateContent({
+    model: 'gemini-3.1-pro-preview',
+    contents: {
+      parts: [
+        { inlineData: { data: fileData, mimeType } },
+        { text: prompt }
+      ]
+    }
+  });
+  return response.text;
+}
+
+export async function transcribeAudio(fileData: string, mimeType: string) {
+  const response = await ai.models.generateContent({
+    model: 'gemini-3-flash-preview',
+    contents: {
+      parts: [
+        { inlineData: { data: fileData, mimeType } },
+        { text: 'Please transcribe this audio accurately.' }
+      ]
+    }
+  });
+  return response.text;
+}
+
+export async function searchGrounding(query: string) {
+  const response = await ai.models.generateContent({
+    model: 'gemini-3-flash-preview',
+    contents: query,
+    config: {
+      tools: [{ googleSearch: {} }]
+    }
+  });
+  return response.text;
+}
+
+export async function textToSpeech(text: string) {
+  const response = await ai.models.generateContent({
+    model: 'gemini-2.5-flash-preview-tts',
+    contents: [{ parts: [{ text }] }],
+    config: {
+      responseModalities: [Modality.AUDIO],
+      speechConfig: {
+        voiceConfig: {
+          prebuiltVoiceConfig: { voiceName: 'Kore' }
+        }
+      }
+    }
+  });
+
+  const base64Audio = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
+  if (base64Audio) {
+    return `data:audio/wav;base64,${base64Audio}`;
+  }
+  throw new Error('No audio generated');
+}
+
+export async function fastTask(prompt: string) {
+  const response = await ai.models.generateContent({
+    model: 'gemini-3.1-flash-lite-preview',
+    contents: prompt
+  });
+  return response.text;
+}
