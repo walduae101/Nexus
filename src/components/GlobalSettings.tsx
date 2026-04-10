@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useSettings } from '../contexts/SettingsContext';
+import { useSettings, IDE_PROFILES } from '../contexts/SettingsContext';
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from './ui/sheet';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
@@ -310,23 +310,27 @@ export function GlobalSettings() {
           </TabsContent>
 
           <TabsContent value="ides" className="space-y-4 mt-4">
-            <div className="flex gap-2">
-              <Input placeholder={t('name_placeholder_ide')} value={newIdeName} onChange={e => setNewIdeName(e.target.value)} />
-              <Input placeholder={t('value_placeholder_ide')} value={newIdeValue} onChange={e => setNewIdeValue(e.target.value)} />
-              <Button onClick={() => { addIde(newIdeName, newIdeValue); setNewIdeName(''); setNewIdeValue(''); }}>
-                <Plus className="w-4 h-4" />
-              </Button>
-            </div>
-            <div className="space-y-2">
-              {savedIdes.filter(ide => !ide.isDefault).map(ide => (
-                <div key={ide.id} className="flex items-center justify-between p-2 bg-muted rounded-md">
-                  <div>
-                    <div className="font-medium text-sm">{ide.name}</div>
-                    <div className="text-xs text-muted-foreground">{ide.value}</div>
+            <div className="space-y-4 overflow-y-auto custom-scrollbar">
+              {IDE_PROFILES.map(ide => (
+                <div key={ide.id} className="bg-zinc-900 border border-zinc-800 rounded-lg p-4 cursor-pointer hover:border-primary/50 transition-colors" onClick={() => updateGlobalDefaults({ targetIde: ide.id })}>
+                  <h3 className="text-zinc-100 font-bold mb-2 flex items-center justify-between">
+                    {ide.name}
+                    {globalDefaults.targetIde === ide.id && <span className="text-xs bg-primary/20 text-primary px-2 py-1 rounded-full">{t('active') || 'Active'}</span>}
+                  </h3>
+                  <div className="space-y-2 text-xs">
+                    <div>
+                      <span className="text-emerald-400 font-semibold uppercase text-[10px] tracking-wider">Capabilities (Can Do)</span>
+                      <ul className="list-disc list-inside text-zinc-400 mt-1 space-y-1">
+                        {ide.canDo.map((cap, i) => <li key={i}>{cap}</li>)}
+                      </ul>
+                    </div>
+                    <div className="pt-2">
+                      <span className="text-red-400 font-semibold uppercase text-[10px] tracking-wider">Limitations (Cannot Do)</span>
+                      <ul className="list-disc list-inside text-zinc-400 mt-1 space-y-1">
+                        {ide.cannotDo.map((cap, i) => <li key={i}>{cap}</li>)}
+                      </ul>
+                    </div>
                   </div>
-                  <Button variant="ghost" size="icon" onClick={() => deleteIde(ide.id)}>
-                    <Trash2 className="w-4 h-4 text-destructive" />
-                  </Button>
                 </div>
               ))}
             </div>

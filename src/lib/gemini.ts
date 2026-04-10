@@ -1,4 +1,5 @@
 import { GoogleGenAI, Type, ThinkingLevel, Modality } from '@google/genai';
+import { IDE_PROFILES } from '../contexts/SettingsContext';
 
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
@@ -84,6 +85,19 @@ export async function chatWithNexus(
     if (settings.techStackContext) dynamicInstruction += `\n**PROJECT TECH STACK & ENVIRONMENT:**\n${settings.techStackContext}\nTailor your code and answers strictly to these technologies.\n`;
     if (settings.githubRepo) dynamicInstruction += `\n**PROJECT REPOSITORY REFERENCE:**\n${settings.githubRepo}\n`;
     if (settings.sparksContext) dynamicInstruction += `\n\n${settings.sparksContext}\n`;
+    
+    if (settings.targetIde) {
+      const activeIdeProfile = IDE_PROFILES.find(ide => ide.id === settings.targetIde) || IDE_PROFILES[0];
+      const ideConstraintsDirective = `
+[TARGET IDE CAPABILITIES PROFILE]
+The user is executing your payloads using: ${activeIdeProfile.name}.
+WHAT IT CAN DO AUTONOMOUSLY: ${activeIdeProfile.canDo.join(' | ')}.
+WHAT IT CANNOT DO: ${activeIdeProfile.cannotDo.join(' | ')}.
+
+CRITICAL INSTRUCTION: Tailor your IDE Payload specifically to these capabilities. If the IDE CANNOT execute terminal commands automatically, you must format the commands clearly for the user to copy/paste. If the IDE CAN autonomously edit files, provide the exact file paths and code blocks so the agent can execute them without human intervention.
+`;
+      dynamicInstruction += `\n\n${ideConstraintsDirective}`;
+    }
   }
 
   const ideCompilerDirective = `

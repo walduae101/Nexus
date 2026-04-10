@@ -252,7 +252,7 @@ function MessageBubble({ msg, user, sessionId, sessions, globalDefaults, isArabi
           </div>
         )}
 
-        {msg.attachmentUrl && msg.attachmentType?.startsWith('image/') && (
+        {msg.attachmentUrl && msg.attachmentType?.startsWith('image/') && (!msg.attachments || msg.attachments.length === 0) && (
           <Card className={`mb-3 overflow-hidden border-border bg-muted/30 ${msg.isUploading ? 'opacity-70 animate-pulse' : ''}`}>
             <CardContent className="p-2 relative group flex items-center justify-center">
               <img src={msg.attachmentUrl} alt="User attachment" className="max-w-full rounded-md" />
@@ -270,6 +270,33 @@ function MessageBubble({ msg, user, sessionId, sessions, globalDefaults, isArabi
               )}
             </CardContent>
           </Card>
+        )}
+
+        {msg.attachments && msg.attachments.length > 0 && (
+          <div className={`grid gap-2 mb-3 w-full ${msg.attachments.length === 1 ? 'grid-cols-1 max-w-sm' : msg.attachments.length <= 4 ? 'grid-cols-2' : 'grid-cols-3'}`}>
+            {msg.attachments.map((url: string, idx: number) => (
+              <div key={idx} className={`relative overflow-hidden rounded-lg border border-zinc-800 ${msg.isUploading ? 'opacity-70 animate-pulse' : ''} group`}>
+                <img 
+                  src={url} 
+                  alt={`Attachment ${idx + 1}`} 
+                  className="w-full h-full object-cover max-h-48 cursor-pointer hover:opacity-90 transition-opacity"
+                  loading="lazy"
+                />
+                {!msg.isUploading && (
+                  <a 
+                    href={url} 
+                    download={`attachment-${idx}.png`} 
+                    target="_blank" 
+                    rel="noreferrer"
+                    className="absolute top-2 right-2 bg-background/80 hover:bg-background p-1.5 rounded-full opacity-0 md:group-hover:opacity-100 transition-opacity z-10 shadow-sm border border-zinc-700"
+                  >
+                    <Download className="w-3 h-3 text-foreground" />
+                  </a>
+                )}
+              </div>
+            ))}
+            {msg.isUploading && <Loader2 className="w-8 h-8 absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-primary animate-spin shadow-lg drop-shadow-xl" />}
+          </div>
         )}
         {msg.attachmentUrl && msg.attachmentType?.startsWith('audio/') && (
           <Card className="mb-3 border-border bg-muted/30">
@@ -425,8 +452,7 @@ export function NexusChat({ user, isSidebarOpen = true }: { user: User; isSideba
   const [model, setModel] = useState<'gemini-3.1-pro-preview' | 'gemini-3-flash-preview' | 'gemini-3.1-flash-lite-preview'>('gemini-3.1-pro-preview');
   const [isLoading, setIsLoading] = useState(false);
   const [hasInitialized, setHasInitialized] = useState(false);
-  const [file, setFile] = useState<File | null>(null);
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const scrollRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -539,24 +565,36 @@ export function NexusChat({ user, isSidebarOpen = true }: { user: User; isSideba
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
     setIsDragging(false);
-    const droppedFile = e.dataTransfer.files?.[0];
-    if (droppedFile) {
-      setFile(droppedFile);
-      setPreviewUrl(URL.createObjectURL(droppedFile));
+    const droppedFiles = Array.from(e.dataTransfer.files || []);
+    if (droppedFiles.length > 0) {
+      setSelectedFiles(prev => {
+        const combined = [...prev, ...droppedFiles];
+        if (combined.length > 10) {
+          alert('You can only attach up to 10 images.');
+          return combined.slice(0, 10);
+        }
+        return combined;
+      });
     }
   };
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const selectedFile = e.target.files?.[0];
-    if (selectedFile) {
-      setFile(selectedFile);
-      setPreviewUrl(URL.createObjectURL(selectedFile));
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files) {
+      const newFiles = Array.from(e.target.files);
+      setSelectedFiles(prev => {
+        const combined = [...prev, ...newFiles];
+        if (combined.length > 10) {
+          alert('You can only attach up to 10 images.'); 
+          return combined.slice(0, 10);
+        }
+        return combined;
+      });
     }
+    e.target.value = '';
   };
 
-  const clearFile = () => {
-    setFile(null);
-    setPreviewUrl(null);
+  const clearFiles = () => {
+    setSelectedFiles([]);
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
@@ -569,8 +607,14 @@ export function NexusChat({ user, isSidebarOpen = true }: { user: User; isSideba
         e.preventDefault(); // Prevent default text pasting behavior for images
         const pastedFile = items[i].getAsFile();
         if (pastedFile) {
-          setFile(pastedFile);
-          setPreviewUrl(URL.createObjectURL(pastedFile));
+          setSelectedFiles(prev => {
+            const combined = [...prev, pastedFile];
+            if (combined.length > 10) {
+              alert('You can only attach up to 10 images.');
+              return combined.slice(0, 10);
+            }
+            return combined;
+          });
         }
       }
     }
@@ -916,19 +960,18 @@ export function NexusChat({ user, isSidebarOpen = true }: { user: User; isSideba
     let userMessage = isOverride ? overrideInput : input;
     let targetIdePayload = isOverride ? undefined : ideText;
     
-    if ((!userMessage.trim() && !targetIdePayload?.trim() && !file) || isLoading) return;
+    if ((!userMessage.trim() && !targetIdePayload?.trim() && selectedFiles.length === 0) || isLoading) return;
     
     if (activeTool === 'image') userMessage = '/image ' + userMessage;
     else if (activeTool === 'search') userMessage = '/search ' + userMessage;
     else if (activeTool === 'tts') userMessage = '/tts ' + userMessage;
 
-    const currentFile = file;
-    const currentPreviewUrl = previewUrl;
+    const currentSelectedFiles = [...selectedFiles];
     
     if (!isOverride) {
       setInput('');
       setIdeText('');
-      clearFile();
+      clearFiles();
       setActiveTool(null);
     }
     setIsLoading(true);
@@ -955,32 +998,39 @@ export function NexusChat({ user, isSidebarOpen = true }: { user: User; isSideba
         });
       }
 
-      let finalAttachmentUrl = '';
+      let uploadedUrls: string[] = [];
       const tempUserMsgId = `temp-user-${Date.now()}`;
       
       const userParentId = overrideParentId !== undefined 
           ? overrideParentId 
           : (activeLeafId || (activeThread.length > 0 ? activeThread[activeThread.length - 1].id : null));
 
-      if (currentFile && currentPreviewUrl) {
+      if (currentSelectedFiles.length > 0) {
          setMessages(prev => [...prev, {
             id: tempUserMsgId,
             sessionId: targetSessionId,
             userId: user.uid,
             role: 'user',
-            content: userMessage || `[Uploaded ${currentFile.type}]`,
+            content: userMessage || `[Uploaded ${currentSelectedFiles.length} file(s)]`,
             timestamp: new Date(),
-            attachmentUrl: currentPreviewUrl,
-            attachmentType: currentFile.type,
+            attachments: currentSelectedFiles.map(f => URL.createObjectURL(f)),
             isUploading: true,
             parentId: userParentId
          }]);
          setActiveLeafId(tempUserMsgId);
 
-         const safeName = currentFile.name.replace(/[^a-zA-Z0-9.\-_]/g, '_');
-         const attachmentRef = ref(storage, `users/${user.uid}/attachments/${Date.now()}_${safeName}`);
-         await uploadBytes(attachmentRef, currentFile, { contentType: currentFile.type });
-         finalAttachmentUrl = await getDownloadURL(attachmentRef);
+         const uploadPromises = currentSelectedFiles.map(async uploadFile => {
+             const safeName = uploadFile.name.replace(/[^a-zA-Z0-9.\-_]/g, '_');
+             const attachmentRef = ref(storage, `users/${user.uid}/attachments/${Date.now()}_${safeName}`);
+             await uploadBytes(attachmentRef, uploadFile, { contentType: uploadFile.type });
+             return await getDownloadURL(attachmentRef);
+         });
+
+         try {
+             uploadedUrls = await Promise.all(uploadPromises);
+         } catch (error) {
+             console.error("Failed to upload images:", error);
+         }
       }
 
       // Save user message
@@ -990,11 +1040,11 @@ export function NexusChat({ user, isSidebarOpen = true }: { user: User; isSideba
         sessionId: targetSessionId,
         userId: user.uid,
         role: 'user',
-        content: userMessage || (currentFile ? `[Uploaded ${currentFile.type}]` : ''),
+        content: userMessage || (currentSelectedFiles.length > 0 ? `[Uploaded ${currentSelectedFiles.length} file(s)]` : ''),
         idePayload: targetIdePayload?.trim() || null,
         timestamp: serverTimestamp(),
         parentId: userParentId,
-        ...(finalAttachmentUrl ? { attachmentUrl: finalAttachmentUrl, attachmentType: currentFile.type } : {})
+        ...(uploadedUrls.length > 0 ? { attachments: uploadedUrls } : {})
       });
       
       setActiveLeafId(userDocRef.id);
@@ -1003,7 +1053,7 @@ export function NexusChat({ user, isSidebarOpen = true }: { user: User; isSideba
          updatedAt: serverTimestamp()
       });
       
-      if (currentFile && currentPreviewUrl) {
+      if (currentSelectedFiles.length > 0) {
          setMessages(prev => prev.filter(m => m.id !== tempUserMsgId));
       }
 
@@ -1048,17 +1098,18 @@ export function NexusChat({ user, isSidebarOpen = true }: { user: User; isSideba
           console.error("TTS Pipeline Complete Error:", error);
           fullResponse = `Failed to generate audio. Diagnostic Code: ${error.message || JSON.stringify(error) || "Unknown backend error"}`;
         }
-      } else if (currentFile) {
+      } else if (currentSelectedFiles.length > 0) {
+        const primaryFile = currentSelectedFiles[0];
         const reader = new FileReader();
         const base64Data = await new Promise<string>((resolve) => {
           reader.onloadend = () => resolve((reader.result as string).split(',')[1]);
-          reader.readAsDataURL(currentFile);
+          reader.readAsDataURL(primaryFile);
         });
         
-        if (currentFile.type.startsWith('audio/')) {
-          fullResponse = await transcribeAudio(base64Data, currentFile.type);
+        if (primaryFile.type.startsWith('audio/')) {
+          fullResponse = await transcribeAudio(base64Data, primaryFile.type);
         } else {
-          fullResponse = await analyzeMedia(base64Data, currentFile.type, userMessage || 'Describe this media.');
+          fullResponse = await analyzeMedia(base64Data, primaryFile.type, userMessage || 'Describe this media.');
         }
       } else {
         // Standard Chat
@@ -1835,20 +1886,23 @@ export function NexusChat({ user, isSidebarOpen = true }: { user: User; isSideba
       </div>
       <div className="p-4 flex flex-col gap-2">
         <div className="max-w-4xl mx-auto w-full mb-2 sm:mb-6 rounded-2xl bg-zinc-900/80 backdrop-blur-md border border-zinc-800/50 shadow-2xl p-2 flex flex-col gap-2 focus-within:ring-0 focus-within:ring-offset-0 focus-within:outline-none">
-          {previewUrl && (
-            <div className="relative inline-block w-24 h-24 ms-2 mt-2">
-              {file?.type.startsWith('video/') ? (
-                <video src={previewUrl} className="w-full h-full object-cover rounded-lg border border-zinc-800/50" />
-              ) : file?.type.startsWith('audio/') ? (
-                <div className="w-full h-full flex items-center justify-center bg-muted rounded-lg border border-zinc-800/50">
-                  <Mic className="w-8 h-8 text-muted-foreground" />
+          {selectedFiles.length > 0 && (
+            <div className="flex items-center gap-2 mb-2 overflow-x-auto custom-scrollbar pb-2 pt-2 px-1">
+              {selectedFiles.map((file, idx) => (
+                <div key={idx} className="relative shrink-0 group">
+                  <img 
+                    src={URL.createObjectURL(file)} 
+                    alt={`Preview ${idx}`} 
+                    className="h-16 w-16 object-cover rounded-lg border border-zinc-700 pointer-events-none" 
+                  />
+                  <button
+                    onClick={() => setSelectedFiles(prev => prev.filter((_, i) => i !== idx))}
+                    className="absolute -top-2 -right-2 bg-zinc-900 border border-zinc-700 text-zinc-300 rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity hover:text-red-400 hover:border-red-500/50"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
                 </div>
-              ) : (
-                <img src={previewUrl} className="w-full h-full object-cover rounded-lg border border-zinc-800/50" />
-              )}
-              <button onClick={clearFile} className="absolute -top-2 -end-2 bg-destructive text-destructive-foreground rounded-full p-1 hover:opacity-80 transition-opacity">
-                <X className="w-4 h-4" />
-              </button>
+              ))}
             </div>
           )}
           <div className="flex flex-col w-full">
@@ -1914,7 +1968,7 @@ export function NexusChat({ user, isSidebarOpen = true }: { user: User; isSideba
             >
               <Mic className="w-5 h-5" />
             </Button>
-            <input type="file" ref={fileInputRef} onChange={handleFileChange} className="hidden" accept="image/*,video/*,audio/*" />
+            <input type="file" ref={fileInputRef} onChange={handleFileSelect} className="hidden" accept="image/*" multiple />
             <TextareaAutosize 
               ref={textareaRef}
               dir={i18n.language.startsWith('ar') ? 'rtl' : 'ltr'}
@@ -1953,7 +2007,7 @@ export function NexusChat({ user, isSidebarOpen = true }: { user: User; isSideba
                   }
 
                   // STAGE 2: Not listening, act as a normal submit
-                  if (!isLoading && (input.trim() || ideText.trim() || file)) {
+                  if (!isLoading && (input.trim() || ideText.trim() || selectedFiles.length > 0)) {
                     sendMessage();
                   }
                 }
@@ -1969,7 +2023,7 @@ export function NexusChat({ user, isSidebarOpen = true }: { user: User; isSideba
                 <Square className="w-4 h-4 fill-current transition-transform group-hover:scale-90" />
               </Button>
             ) : (
-              <Button type="submit" disabled={isLoading || (!input.trim() && !ideText.trim() && !file)} className="bg-primary hover:bg-primary/90 text-primary-foreground shrink-0 rounded-xl hover:opacity-80 transition-opacity">
+              <Button type="submit" disabled={isLoading || (!input.trim() && !ideText.trim() && selectedFiles.length === 0)} className="bg-primary hover:bg-primary/90 text-primary-foreground shrink-0 rounded-xl hover:opacity-80 transition-opacity">
                 <Send className="w-4 h-4" />
               </Button>
             )}

@@ -23,6 +23,33 @@ export interface CustomMode {
   isPremade?: boolean;
 }
 
+export const IDE_PROFILES = [
+  {
+    id: 'antigravity',
+    name: 'Antigravity',
+    canDo: ['Autonomously create, read, and edit files', 'Execute terminal commands natively', 'Deploy to cloud directly'],
+    cannotDo: ['Cannot physically test UI on a real mobile device']
+  },
+  {
+    id: 'cursor',
+    name: 'Cursor',
+    canDo: ['Edit files autonomously via Composer', 'Run terminal commands if approved by user'],
+    cannotDo: ['Cannot autonomously browse the live web without specific tools']
+  },
+  {
+    id: 'windsurf',
+    name: 'Windsurf',
+    canDo: ['Deep workspace context awareness', 'Autonomous agentic coding and file creation'],
+    cannotDo: ['Cannot bypass human approval for destructive actions']
+  },
+  {
+    id: 'vscode',
+    name: 'VS Code (Standard)',
+    canDo: ['Highlight syntax', 'Accept standard markdown code blocks'],
+    cannotDo: ['CANNOT autonomously edit files', 'CANNOT run terminal commands automatically. User MUST copy/paste the payload manually.']
+  }
+];
+
 export interface GlobalDefaults {
   userLang: string;
   ideLang: string;
