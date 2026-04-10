@@ -168,13 +168,22 @@ function MessageBubble({ msg, user, sessionId, sessions, globalDefaults, isArabi
   const [isOverflowing, setIsOverflowing] = useState(false);
 
   useEffect(() => {
-    // Only calculate overflow for user messages, and only when it's clamped (not expanded)
-    if (msg.role === 'user' && textRef.current && !isExpanded) {
-      const { scrollHeight, clientHeight } = textRef.current;
-      // If scrollHeight is strictly greater than the clamped clientHeight, it's overflowing
-      setIsOverflowing(scrollHeight > clientHeight);
-    }
-  }, [msg.content, msg.role]);
+    if (msg.role !== 'user' || isExpanded) return;
+
+    const checkOverflow = () => {
+      if (textRef.current) {
+        // Add a 2px tolerance to avoid sub-pixel rounding false-positives
+        const overflowing = textRef.current.scrollHeight > textRef.current.clientHeight + 2;
+        setIsOverflowing(overflowing);
+      }
+    };
+
+    // Run immediately
+    checkOverflow();
+    // Run again slightly after paint to catch late layout shifts
+    const timer = setTimeout(checkOverflow, 50);
+    return () => clearTimeout(timer);
+  }, [msg.content, isExpanded, msg.role]);
 
   const content = msg.content;
   const isMsgArabic = isArabic(content);
@@ -324,10 +333,10 @@ function MessageBubble({ msg, user, sessionId, sessions, globalDefaults, isArabi
                 </Markdown>
               </div>
               {msg.role === 'user' && isOverflowing && (
-                <div className="mt-2 flex justify-center border-t border-black/10 dark:border-white/10 pt-1">
+                <div className="mt-1 flex justify-start w-full" dir="ltr">
                   <button 
                     onClick={(e) => { e.stopPropagation(); setIsExpanded(!isExpanded); }}
-                    className="p-1 text-inherit opacity-70 hover:opacity-100 transition-opacity rounded-full hover:bg-black/5 dark:hover:bg-white/5"
+                    className="p-1 -ml-1 text-zinc-500 hover:text-zinc-300 transition-colors rounded-md hover:bg-zinc-800/50 flex items-center justify-center"
                     title={isExpanded ? "Show Less" : "Show More"}
                   >
                     {isExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}

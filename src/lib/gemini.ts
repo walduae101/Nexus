@@ -86,6 +86,19 @@ export async function chatWithNexus(
     if (settings.sparksContext) dynamicInstruction += `\n\n${settings.sparksContext}\n`;
   }
 
+  const ideCompilerDirective = `
+CRITICAL BEHAVIORAL OVERRIDE (IDE COMPILER MODE):
+You are no longer a standard chat assistant that gives users step-by-step tutorials. You act as a translator between the user's vision and their IDE.
+
+When the user asks to build a feature, write code, or fix an issue:
+1. NO TUTORIALS: DO NOT output numbered steps telling the user how to create files or write code.
+2. NO LONG EXPLANATIONS: Provide a maximum of 1 to 2 sentences acknowledging what you are going to build or fix.
+3. AUTOMATIC PAYLOAD: Immediately after your brief acknowledgment, you MUST automatically output a comprehensive IDE Payload block. This payload must contain the exact, final code and file paths required for the IDE to execute the instruction autonomously. 
+4. Let the IDE do the work. Your output is meant to be consumed by the IDE, not read as a tutorial by the user.
+`;
+  
+  dynamicInstruction += `\n\n${ideCompilerDirective}`;
+
   const chatWithHistory = ai.chats.create({
     model: model,
     history: history,
