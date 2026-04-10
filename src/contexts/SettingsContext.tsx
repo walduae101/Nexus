@@ -47,6 +47,20 @@ export const IDE_PROFILES = [
     name: 'VS Code (Standard)',
     canDo: ['Highlight syntax', 'Accept standard markdown code blocks'],
     cannotDo: ['CANNOT autonomously edit files', 'CANNOT run terminal commands automatically. User MUST copy/paste the payload manually.']
+  },
+  {
+    id: 'claude',
+    name: 'Claude (Desktop / Code)',
+    canDo: [
+      'Connect to local databases, tools, and file systems via Model Context Protocol (MCP)',
+      'Navigate, click, and inspect live websites autonomously using Browser Tools (Computer Use)',
+      'Autonomously execute terminal commands and manipulate deep file structures (via Claude Code CLI)'
+    ],
+    cannotDo: [
+      'Lacks a traditional integrated code editor GUI (operates strictly via Chat UI or CLI)',
+      'Requires manual user configuration to start and expose local MCP servers before use',
+      'May require human approval for highly destructive terminal commands'
+    ]
   }
 ];
 
