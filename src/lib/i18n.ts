@@ -56,6 +56,8 @@ const en = {
     "sparks_intro_f2": "Enhance your thoughts into perfect prompts using AI.",
     "sparks_intro_f3": "Nexus silently reads your Sparks to align with your goals, even if you don't mention them!",
     "sparks_intro_btn": "Got it, let's go!",
+    "suggest_sparks": "Auto-Suggest Ideas",
+    "generating_sparks": "Brainstorming...",
 
     // Chat Settings Dialog
     "session_settings": "Chat Session Settings",
@@ -216,6 +218,8 @@ const ar = {
     "sparks_intro_f2": "حسّن أفكارك وحولها إلى أوامر احترافية بضغطة زر.",
     "sparks_intro_f3": "يقرأ Nexus أفكارك بصمت ليفهم أهدافك العميقة، حتى لو لم تتحدث عنها!",
     "sparks_intro_btn": "علم، لننطلق!",
+    "suggest_sparks": "اقتراح أفكار ذكية",
+    "generating_sparks": "جاري العصف الذهني...",
 
     // Chat Settings Dialog
     "session_settings": "إعدادات جلسة المحادثة",

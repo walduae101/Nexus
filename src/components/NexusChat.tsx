@@ -9,7 +9,7 @@ import { Input } from './ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue, SelectGroup, SelectLabel, SelectSeparator } from './ui/select';
 import { ScrollArea } from './ui/scroll-area';
 import { Card, CardContent } from './ui/card';
-import { Send, Bot, User as UserIcon, Loader2, Paperclip, X, Image as ImageIcon, Mic, Search, Video, Plus, MessageSquare, Pencil, Check, Trash2, Download, UploadCloud, Play, Settings, Info, FolderSync, Copy, Wand2, Globe, Volume2, MoreVertical, Pin, ChevronUp, ChevronDown, ChevronLeft, ChevronRight, Lightbulb } from 'lucide-react';
+import { Send, Bot, User as UserIcon, Loader2, Paperclip, X, Image as ImageIcon, Mic, Search, Video, Plus, MessageSquare, Pencil, Check, Trash2, Download, UploadCloud, Play, Settings, Info, FolderSync, Copy, Wand2, Globe, Volume2, MoreVertical, Pin, ChevronUp, ChevronDown, ChevronLeft, ChevronRight, Lightbulb, Sparkles } from 'lucide-react';
 import Markdown from 'react-markdown';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogClose, DialogTrigger } from './ui/dialog';
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from './ui/sheet';
@@ -379,6 +379,7 @@ export function NexusChat({ user, isSidebarOpen = true }: { user: User; isSideba
   const [isSparksOpen, setIsSparksOpen] = useState(false);
   const [newSparkText, setNewSparkText] = useState('');
   const [isEnhancingSparkId, setIsEnhancingSparkId] = useState<string | null>(null);
+  const [isGeneratingSparks, setIsGeneratingSparks] = useState(false);
   const [isSparkFileUploading, setIsSparkFileUploading] = useState(false);
   const sparkFileInputRef = useRef<HTMLInputElement>(null);
 
@@ -598,6 +599,46 @@ export function NexusChat({ user, isSidebarOpen = true }: { user: User; isSideba
       console.error("Failed to enhance spark", e);
     } finally {
       setIsEnhancingSparkId(null);
+    }
+  };
+
+  const generateAutoSparks = async () => {
+    setIsGeneratingSparks(true);
+    try {
+      const currentSessionData = sessions.find((s: any) => s.id === sessionId);
+      const activeStackIds = currentSessionData?.techStack?.length > 0 ? currentSessionData.techStack : (globalDefaults.globalTechStack || []);
+      const activeStackLabels = activeStackIds.map((id: string) => TECH_STACKS.find(t => t.id === id)?.label || id);
+      
+      const getLanguageName = (code: string) => {
+        if (code?.includes('ar')) return 'Arabic';
+        return 'English';
+      };
+      const targetLanguage = getLanguageName(i18n.language);
+
+      const generatorPrompt = `You are an expert technical architect. Based on the user's active tech stack (${activeStackLabels.join(', ')}) and the recent conversation context, generate exactly 3 high-quality, creative, and actionable project ideas, next steps, or potential edge-cases they should consider. 
+      CRITICAL RULES: 
+      1. Do not use generic filler. Be highly specific to their workflow.
+      2. Separate each idea strictly with the delimiter "|||". 
+      3. Do not include introductory or concluding text.
+      4. YOU MUST RESPOND EXCLUSIVELY IN ${targetLanguage.toUpperCase()}.`;
+
+      const rawResponse = await fastTask(generatorPrompt);
+      const newIdeas = rawResponse.split('|||').map(idea => idea.trim()).filter(idea => idea.length > 0);
+      
+      const currentSparks = currentSessionData?.sparks || [];
+      const generatedSparks = newIdeas.map(text => ({
+        id: `spark-auto-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+        text: text.replace(/^[-*]\s*/g, ''), // Strip leading markdown bullets if AI hallucinates them
+        attachments: [],
+        status: 'draft' as const,
+        createdAt: Date.now()
+      }));
+      
+      await updateChatSettings({ sparks: [...currentSparks, ...generatedSparks] });
+    } catch (e) {
+      console.error("Failed to generate auto sparks", e);
+    } finally {
+      setIsGeneratingSparks(false);
     }
   };
 
@@ -1342,6 +1383,16 @@ export function NexusChat({ user, isSidebarOpen = true }: { user: User; isSideba
                     >
                       <Plus className="h-4 w-4" /> {t('add_spark')}
                     </button>
+                    {(messages.length > 2 || (sessions.find(s => s.id === sessionId)?.techStack?.length > 0) || !!sessions.find(s => s.id === sessionId)?.githubRepo) && (
+                      <button 
+                        onClick={generateAutoSparks} 
+                        disabled={isGeneratingSparks}
+                        className="w-full mt-3 flex items-center justify-center gap-2 bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-400 border border-indigo-500/30 py-2 rounded-lg text-sm font-medium transition-all"
+                      >
+                        <Sparkles className={`h-4 w-4 ${isGeneratingSparks ? 'animate-pulse' : ''}`} />
+                        {isGeneratingSparks ? t('generating_sparks') || 'Brainstorming...' : t('suggest_sparks') || 'Auto-Suggest Ideas'}
+                      </button>
+                    )}
                   </div>
 
                   {/* Spark List */}
