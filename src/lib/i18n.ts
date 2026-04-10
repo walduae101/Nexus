@@ -58,6 +58,16 @@ const en = {
     "sparks_intro_btn": "Got it, let's go!",
     "suggest_sparks": "Auto-Suggest Ideas",
     "generating_sparks": "Brainstorming...",
+    "dual_mode": "Dual Input Mode",
+    "user_note": "Your Note...",
+    "ide_payload": "Paste IDE Context/Code...",
+    "attached_ide": "IDE Context Attached",
+    "dual_intro_title": "Meet Dual Input Mode 🎛️",
+    "dual_intro_desc": "Say goodbye to messy text walls! We've upgraded how you talk to Nexus:",
+    "dual_intro_f1": "Separate Context: Paste your massive code blocks into the IDE Payload tab.",
+    "dual_intro_f2": "Clear Questions: Type your actual question in the User Note tab.",
+    "dual_intro_f3": "Smarter AI: Nexus will read both perfectly, keeping your chat feed clean and organized.",
+    "dual_intro_btn": "Awesome, let's code!",
 
     // Chat Settings Dialog
     "session_settings": "Chat Session Settings",
@@ -220,6 +230,16 @@ const ar = {
     "sparks_intro_btn": "علم، لننطلق!",
     "suggest_sparks": "اقتراح أفكار ذكية",
     "generating_sparks": "جاري العصف الذهني...",
+    "dual_mode": "وضع الإدخال المزدوج",
+    "user_note": "ملاحظتك...",
+    "ide_payload": "ألصق سياق/كود بيئة التطوير...",
+    "attached_ide": "مرفق سياق بيئة التطوير",
+    "dual_intro_title": "تعرف على الإدخال المزدوج 🎛️",
+    "dual_intro_desc": "وداعاً للنصوص الطويلة المزعجة! قمنا بتحديث طريقة تواصلك مع Nexus:",
+    "dual_intro_f1": "فصل السياق: قم بلصق الأكواد الطويلة في خانة بيئة التطوير (IDE Payload).",
+    "dual_intro_f2": "أسئلة واضحة: اكتب سؤالك المباشر في خانة ملاحظة المستخدم (User Note).",
+    "dual_intro_f3": "ذكاء أكبر: سيفهم Nexus الاثنين معاً، مع الحفاظ على نظافة وترتيب المحادثة.",
+    "dual_intro_btn": "رائع، لنبدأ البرمجة!",
 
     // Chat Settings Dialog
     "session_settings": "إعدادات جلسة المحادثة",

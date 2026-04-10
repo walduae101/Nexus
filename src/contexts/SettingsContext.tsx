@@ -35,6 +35,7 @@ export interface GlobalDefaults {
   fontSize: string;
   globalTechStack?: string[];
   autoCopyVoice?: boolean;
+  enableDualMode?: boolean;
 }
 
 interface SettingsContextType {
@@ -86,11 +87,7 @@ export const SettingsProvider: React.FC<{ user: User | null; children: React.Rea
   const [savedInstructions, setSavedInstructions] = useState<SavedInstruction[]>([]);
   const [customModes, setCustomModes] = useState<CustomMode[]>(PREMADE_MODES);
   const [globalDefaults, setGlobalDefaults] = useState<GlobalDefaults>(() => {
-    try {
-      const stored = localStorage.getItem('nexus_user_settings');
-      if (stored) return JSON.parse(stored);
-    } catch {}
-    return {
+    const baseDefaults: GlobalDefaults = {
       userLang: 'en-US',
       ideLang: 'en-US',
       targetIde: 'VS Code',
@@ -101,8 +98,17 @@ export const SettingsProvider: React.FC<{ user: User | null; children: React.Rea
       fontFamily: 'system',
       fontSize: 'medium',
       globalTechStack: [],
-      autoCopyVoice: false
+      autoCopyVoice: false,
+      enableDualMode: true
     };
+    try {
+      const stored = localStorage.getItem('nexus_user_settings');
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        return { ...baseDefaults, ...parsed, enableDualMode: parsed.enableDualMode ?? true };
+      }
+    } catch {}
+    return baseDefaults;
   });
 
   useEffect(() => {

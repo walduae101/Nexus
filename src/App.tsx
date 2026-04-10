@@ -19,6 +19,7 @@ import { SettingsProvider, useSettings } from './contexts/SettingsContext';
 import { OnboardingWizard } from './components/OnboardingWizard';
 import { GlobalSettings } from './components/GlobalSettings';
 import { SparksIntroModal } from './components/SparksIntroModal';
+import { DualModeIntroModal } from './components/DualModeIntroModal';
 import { TooltipProvider } from './components/ui/tooltip';
 
 function AppContent() {
@@ -144,6 +145,7 @@ function NexusWorkspace({ user, isSidebarOpen, setIsSidebarOpen, signOut, auth, 
 
           <main className="flex-1 overflow-hidden flex flex-col p-6 md:p-8 relative">
             <SparksIntroModal />
+            <DualModeIntroModal />
             <div className="flex-1 overflow-hidden flex flex-col">
               <NexusChat user={user} isSidebarOpen={isSidebarOpen} />
             </div>

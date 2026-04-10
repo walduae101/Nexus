@@ -9,7 +9,7 @@ import { Input } from './ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue, SelectGroup, SelectLabel, SelectSeparator } from './ui/select';
 import { ScrollArea } from './ui/scroll-area';
 import { Card, CardContent } from './ui/card';
-import { Send, Bot, User as UserIcon, Loader2, Paperclip, X, Image as ImageIcon, Mic, Search, Video, Plus, MessageSquare, Pencil, Check, Trash2, Download, UploadCloud, Play, Settings, Info, FolderSync, Copy, Wand2, Globe, Volume2, MoreVertical, Pin, ChevronUp, ChevronDown, ChevronLeft, ChevronRight, Lightbulb, Sparkles } from 'lucide-react';
+import { Send, Bot, User as UserIcon, Loader2, Paperclip, X, Image as ImageIcon, Mic, Search, Video, Plus, MessageSquare, Pencil, Check, Trash2, Download, UploadCloud, Play, Settings, Info, FolderSync, Copy, Wand2, Globe, Volume2, MoreVertical, Pin, ChevronUp, ChevronDown, ChevronLeft, ChevronRight, Lightbulb, Sparkles, Terminal, Square } from 'lucide-react';
 import Markdown from 'react-markdown';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogClose, DialogTrigger } from './ui/dialog';
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from './ui/sheet';
@@ -296,7 +296,7 @@ function MessageBubble({ msg, user, sessionId, sessions, globalDefaults, isArabi
             <>
               <div 
                 ref={msg.role === 'user' ? textRef : null}
-                dir={isMsgArabic ? "rtl" : "ltr"} 
+                dir="auto" 
                 className={`markdown-body prose ${msg.role === 'user' ? 'prose-invert prose-headings:text-primary-foreground prose-a:text-primary-foreground' : 'prose-invert'} max-w-none prose-p:leading-relaxed prose-pre:bg-zinc-950 prose-pre:border prose-pre:border-zinc-800 text-start ${msg.role === 'user' && !isExpanded ? 'line-clamp-5 overflow-hidden break-words' : 'break-words'}`}
               >
                 <Markdown
@@ -332,6 +332,18 @@ function MessageBubble({ msg, user, sessionId, sessions, globalDefaults, isArabi
                   >
                     {isExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
                   </button>
+                </div>
+              )}
+
+              {msg.role === 'user' && msg.idePayload && (
+                <div className="mt-3 bg-zinc-950 border border-zinc-800 rounded-lg overflow-hidden text-start dir-ltr">
+                  <div className="flex items-center gap-2 bg-zinc-900 px-3 py-2 border-b border-zinc-800">
+                    <Terminal className="h-4 w-4 text-primary" />
+                    <span className="text-xs font-medium text-zinc-300">{t('attached_ide') || 'IDE Context Attached'}</span>
+                  </div>
+                  <div className="p-3 text-xs font-mono text-zinc-400 whitespace-pre-wrap break-words custom-scrollbar max-h-64 overflow-y-auto" dir="auto">
+                    {msg.idePayload}
+                  </div>
                 </div>
               )}
             </>
@@ -382,6 +394,15 @@ export function NexusChat({ user, isSidebarOpen = true }: { user: User; isSideba
   const [messageLimit, setMessageLimit] = useState(50);
   const [activeLeafId, setActiveLeafId] = useState<string | null>(null);
   
+  const abortControllerRef = useRef<AbortController | null>(null);
+
+  const stopGeneration = () => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
+  };
+
   const observer = useRef<IntersectionObserver | null>(null);
   const prevScrollHeightRef = useRef<number>(0);
   const prevScrollTopRef = useRef<number>(0);
@@ -389,6 +410,8 @@ export function NexusChat({ user, isSidebarOpen = true }: { user: User; isSideba
   const loadMoreRef = useRef<HTMLDivElement>(null);
 
   const [input, setInput] = useState('');
+  const [ideText, setIdeText] = useState('');
+  const [activeTab, setActiveTab] = useState<'user' | 'ide'>('user');
   const [processingAction, setProcessingAction] = useState<'text' | 'image' | 'tts' | 'search' | null>(null);
   const [model, setModel] = useState<'gemini-3.1-pro-preview' | 'gemini-3-flash-preview' | 'gemini-3.1-flash-lite-preview'>('gemini-3.1-pro-preview');
   const [isLoading, setIsLoading] = useState(false);
@@ -882,8 +905,9 @@ export function NexusChat({ user, isSidebarOpen = true }: { user: User; isSideba
   const sendMessage = async (overrideParentId?: string | null, overrideInput?: string) => {
     const isOverride = overrideInput !== undefined;
     let userMessage = isOverride ? overrideInput : input;
+    let targetIdePayload = isOverride ? undefined : ideText;
     
-    if ((!userMessage.trim() && !file) || isLoading) return;
+    if ((!userMessage.trim() && !targetIdePayload?.trim() && !file) || isLoading) return;
     
     if (activeTool === 'image') userMessage = '/image ' + userMessage;
     else if (activeTool === 'search') userMessage = '/search ' + userMessage;
@@ -894,6 +918,7 @@ export function NexusChat({ user, isSidebarOpen = true }: { user: User; isSideba
     
     if (!isOverride) {
       setInput('');
+      setIdeText('');
       clearFile();
       setActiveTool(null);
     }
@@ -957,6 +982,7 @@ export function NexusChat({ user, isSidebarOpen = true }: { user: User; isSideba
         userId: user.uid,
         role: 'user',
         content: userMessage || (currentFile ? `[Uploaded ${currentFile.type}]` : ''),
+        idePayload: targetIdePayload?.trim() || null,
         timestamp: serverTimestamp(),
         parentId: userParentId,
         ...(finalAttachmentUrl ? { attachmentUrl: finalAttachmentUrl, attachmentType: currentFile.type } : {})
@@ -1063,11 +1089,30 @@ export function NexusChat({ user, isSidebarOpen = true }: { user: User; isSideba
           activeSettings.sparksContext = `[PRIVATE USER SPARKS]: The user has the following unsubmitted drafts/ideas: "${sparkTexts}". Use this to understand their deeper intent and align your responses to their overall goals. CRITICAL: DO NOT mention these sparks proactively. Act as if you don't know they exist unless the user directly brings them up.`;
         }
 
-        const stream = await chatWithNexus(history, userMessage, model, activeSettings);
+        let finalAiPrompt = "";
+        if (targetIdePayload?.trim()) finalAiPrompt += `[SYSTEM: THE FOLLOWING IS THE USER'S IDE CONTEXT/PAYLOAD]:\n${targetIdePayload.trim()}\n\n`;
+        if (userMessage.trim()) finalAiPrompt += `[SYSTEM: THE FOLLOWING IS THE USER'S DIRECT QUESTION/NOTE]:\n${userMessage.trim()}`;
+        if (!userMessage.trim() && targetIdePayload?.trim()) finalAiPrompt += `[SYSTEM: The user provided code/context without a specific question. Analyze it and provide a brief, insightful summary or suggest improvements.]`;
+
+        abortControllerRef.current = new AbortController();
+        
+        let stream;
+        try {
+          stream = await chatWithNexus(history, finalAiPrompt, model, activeSettings, abortControllerRef.current.signal);
+        } catch(error: any) {
+          if (error.name === 'AbortError' || error.message?.includes('abort') || error.message?.toLowerCase().includes('cancelled')) {
+             console.log('Chat initialization aborted.');
+             abortControllerRef.current = null;
+             return;
+          } else {
+             throw error;
+          }
+        }
+
         setProcessingAction(null); // Clear loading spinner instantly
         
         const aiMsgId = `temp-ai-${Date.now()}`;
-        setMessages(prev => [...prev, { id: aiMsgId, role: 'model', content: '', timestamp: null, parentId: userDocRef.id }]);
+        setMessages(prev => [...prev, { id: aiMsgId, role: 'model', content: '', timestamp: null, parentId: userDocRef.id, isGenerating: true }]);
         setActiveLeafId(aiMsgId);
 
         let pendingBuffer = "";
@@ -1090,16 +1135,29 @@ export function NexusChat({ user, isSidebarOpen = true }: { user: User; isSideba
           }
         }, 15);
 
-        try {
-          for await (const chunk of stream) {
-            if (chunk.text) {
-              fullResponse += chunk.text;
-              pendingBuffer += chunk.text;
+        if (stream) {
+          try {
+            for await (const chunk of stream) {
+              if (chunk.text) {
+                fullResponse += chunk.text;
+                pendingBuffer += chunk.text;
+              }
             }
+          } catch (error: any) {
+            if (error.name === 'AbortError' || error.message?.includes('abort') || error.message?.toLowerCase().includes('cancelled')) {
+              console.log('Stream stopped by user.');
+              setMessages(prev => prev.map(msg => 
+                msg.id === aiMsgId ? { ...msg, isGenerating: false } : msg
+              ));
+            } else {
+              console.error("Stream error:", error);
+            }
+          } finally {
+            abortControllerRef.current = null;
+            isNetworkDone = true;
           }
-        } catch (error) {
-          console.error("Stream error:", error);
-        } finally {
+        } else {
+          abortControllerRef.current = null;
           isNetworkDone = true;
         }
 
@@ -1794,6 +1852,26 @@ export function NexusChat({ user, isSidebarOpen = true }: { user: User; isSideba
                 </button>
               </div>
             )}
+            {globalDefaults.enableDualMode && !activeTool && (
+              <div className="flex items-center gap-1 mb-2 bg-zinc-900/80 p-1 rounded-lg w-fit border border-zinc-800 shadow-sm ms-1 mt-1">
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('user')}
+                  title={t('user_note')}
+                  className={`p-1.5 rounded-md transition-all flex items-center justify-center ${activeTab === 'user' ? 'bg-zinc-800 shadow-sm ring-1 ring-zinc-700/50' : 'opacity-50 hover:opacity-100 hover:bg-zinc-800/50'}`}
+                >
+                  <img src={user?.photoURL || '/default-avatar.png'} alt="User" className="h-5 w-5 rounded-full object-cover" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('ide')}
+                  title={t('ide_payload')}
+                  className={`p-1.5 rounded-md transition-all flex items-center justify-center ${activeTab === 'ide' ? 'bg-primary/20 text-primary shadow-sm ring-1 ring-primary/30' : 'text-zinc-500 hover:text-primary hover:bg-zinc-800/50'}`}
+                >
+                  <Terminal className="h-5 w-5" />
+                </button>
+              </div>
+            )}
             <form onSubmit={(e) => { e.preventDefault(); sendMessage(); }} className="flex gap-2 items-center w-full">
               <DropdownMenu>
                   <DropdownMenuTrigger className={`inline-flex items-center justify-center rounded-md w-8 h-8 shrink-0 transition-opacity outline-none cursor-pointer hover:bg-muted ${activeTool ? 'text-primary' : 'text-muted-foreground hover:text-foreground'}`}>
@@ -1831,9 +1909,9 @@ export function NexusChat({ user, isSidebarOpen = true }: { user: User; isSideba
             <TextareaAutosize 
               ref={textareaRef}
               dir={i18n.language.startsWith('ar') ? 'rtl' : 'ltr'}
-              value={input} 
+              value={activeTab === 'user' ? input : ideText} 
               onPaste={handlePaste}
-              onChange={(e) => setInput(e.target.value)}
+              onChange={(e) => activeTab === 'user' ? setInput(e.target.value) : setIdeText(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && !e.shiftKey) {
                   e.preventDefault(); // Prevent newline
@@ -1866,20 +1944,26 @@ export function NexusChat({ user, isSidebarOpen = true }: { user: User; isSideba
                   }
 
                   // STAGE 2: Not listening, act as a normal submit
-                  if (!isLoading && (input.trim() || file)) {
+                  if (!isLoading && (input.trim() || ideText.trim() || file)) {
                     sendMessage();
                   }
                 }
               }}
-              placeholder={activeTool === 'image' ? 'Describe the image...' : activeTool === 'search' ? 'What do you want to search?' : activeTool === 'tts' ? 'What should I say?' : t('ask_nexus')} 
-              className="bg-transparent border-none text-foreground flex-1 shadow-none w-full resize-none break-words whitespace-pre-wrap overflow-x-hidden overflow-y-auto py-2 text-start [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none] focus:outline-none focus:ring-0 focus-visible:ring-0 focus-visible:ring-offset-0 focus-visible:outline-none"
+              placeholder={activeTool === 'image' ? 'Describe the image...' : activeTool === 'search' ? 'What do you want to search?' : activeTool === 'tts' ? 'What should I say?' : (activeTab === 'ide' ? (t('ide_payload') || 'Paste IDE Context/Code...') : t('ask_nexus'))} 
+              className={`bg-transparent border-none text-foreground flex-1 shadow-none w-full resize-none break-words whitespace-pre-wrap overflow-x-hidden overflow-y-auto py-2 text-start [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none] focus:outline-none focus:ring-0 focus-visible:ring-0 focus-visible:ring-offset-0 focus-visible:outline-none ${activeTab === 'ide' ? 'font-mono text-zinc-300 text-[0.8rem]' : ''}`}
               disabled={isLoading}
               minRows={1}
               maxRows={8}
             />
-            <Button type="submit" disabled={isLoading || (!input.trim() && !file)} className="bg-primary hover:bg-primary/90 text-primary-foreground shrink-0 rounded-xl hover:opacity-80 transition-opacity">
-              <Send className="w-4 h-4" />
-            </Button>
+            {isLoading ? (
+              <Button type="button" onClick={stopGeneration} className="bg-zinc-800 hover:bg-red-500/20 text-zinc-400 hover:text-red-400 shrink-0 rounded-xl transition-colors group" title="Stop generating">
+                <Square className="w-4 h-4 fill-current transition-transform group-hover:scale-90" />
+              </Button>
+            ) : (
+              <Button type="submit" disabled={isLoading || (!input.trim() && !ideText.trim() && !file)} className="bg-primary hover:bg-primary/90 text-primary-foreground shrink-0 rounded-xl hover:opacity-80 transition-opacity">
+                <Send className="w-4 h-4" />
+              </Button>
+            )}
           </form>
           </div>
         </div>

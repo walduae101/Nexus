@@ -62,7 +62,8 @@ export async function chatWithNexus(
   history: { role: 'user' | 'model', parts: { text: string }[] }[], 
   message: string, 
   model: 'gemini-3.1-pro-preview' | 'gemini-3-flash-preview' | 'gemini-3.1-flash-lite-preview' = 'gemini-3.1-pro-preview',
-  settings?: { userLang?: string, ideLang?: string, targetIde?: string, customInstructions?: string, complexityModeName?: string, complexityModeRules?: string, techStackContext?: string, githubRepo?: string, sparksContext?: string }
+  settings?: { userLang?: string, ideLang?: string, targetIde?: string, customInstructions?: string, complexityModeName?: string, complexityModeRules?: string, techStackContext?: string, githubRepo?: string, sparksContext?: string },
+  abortSignal?: AbortSignal
 ) {
   const useThinking = model === 'gemini-3.1-pro-preview';
   
@@ -94,7 +95,10 @@ export async function chatWithNexus(
     }
   });
 
-  return await chatWithHistory.sendMessageStream({ message });
+  return await chatWithHistory.sendMessageStream({ 
+    message,
+    config: abortSignal ? { abortSignal } : undefined 
+  });
 }
 
 export async function generateImage(prompt: string, model: 'gemini-3.1-flash-image-preview' | 'gemini-3-pro-image-preview', aspectRatio: string, size: string) {
