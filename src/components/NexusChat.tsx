@@ -615,12 +615,29 @@ export function NexusChat({ user, isSidebarOpen = true }: { user: User; isSideba
       };
       const targetLanguage = getLanguageName(i18n.language);
 
-      const generatorPrompt = `You are an expert technical architect. Based on the user's active tech stack (${activeStackLabels.join(', ')}) and the recent conversation context, generate exactly 3 high-quality, creative, and actionable project ideas, next steps, or potential edge-cases they should consider. 
-      CRITICAL RULES: 
-      1. Do not use generic filler. Be highly specific to their workflow.
-      2. Separate each idea strictly with the delimiter "|||". 
-      3. Do not include introductory or concluding text.
-      4. YOU MUST RESPOND EXCLUSIVELY IN ${targetLanguage.toUpperCase()}.`;
+      const recentContext = messages
+        .slice(-4)
+        .map((m: any) => `[${(m.role || 'user').toUpperCase()}]: ${m.content}`)
+        .join('\n');
+
+      const generatorPrompt = `You are a brilliant, highly creative AI Co-Pilot working alongside the user.
+      
+      CURRENT CONTEXT:
+      Tech Stack: ${activeStackLabels.join(', ') || 'Not specified'}
+      Recent Conversation:
+      """
+      ${recentContext || 'No conversation yet. Assume the user is starting a fresh project with the tech stack above.'}
+      """
+
+      YOUR TASK:
+      Based heavily on the 'Recent Conversation' above, generate exactly 3 creative, inspiring, and highly relevant "Sparks" (ideas or next steps) for the user. 
+      
+      CRITICAL RULES:
+      1. FOCUS ON THE GOAL: Your ideas must directly relate to what the user is currently trying to achieve in the chat. Do not suggest random architectural patterns.
+      2. THE "WOW" FACTOR: Make the ideas sound exciting and innovative. Give them a clear benefit. (e.g., instead of "Implement Redis caching", suggest "Add a 'Smart Pre-Load' feature so the app feels instantly responsive before the user even clicks").
+      3. TONE: Be easy to understand, encouraging, and human. Avoid dense technical jargon unless the user's recent messages are heavily technical.
+      4. FORMAT: Separate each idea strictly with the delimiter "|||". Do not include introductory or concluding text.
+      5. LANGUAGE: YOU MUST RESPOND EXCLUSIVELY IN ${targetLanguage.toUpperCase()}.`;
 
       const rawResponse = await fastTask(generatorPrompt);
       const newIdeas = rawResponse.split('|||').map(idea => idea.trim()).filter(idea => idea.length > 0);
