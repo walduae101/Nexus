@@ -34,6 +34,7 @@ export interface GlobalDefaults {
   fontFamily: string;
   fontSize: string;
   globalTechStack?: string[];
+  autoCopyVoice?: boolean;
 }
 
 interface SettingsContextType {
@@ -99,7 +100,8 @@ export const SettingsProvider: React.FC<{ user: User | null; children: React.Rea
       hasCompletedOnboarding: false,
       fontFamily: 'system',
       fontSize: 'medium',
-      globalTechStack: []
+      globalTechStack: [],
+      autoCopyVoice: false
     };
   });
 

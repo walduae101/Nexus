@@ -9,9 +9,10 @@ import { Input } from './ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue, SelectGroup, SelectLabel, SelectSeparator } from './ui/select';
 import { ScrollArea } from './ui/scroll-area';
 import { Card, CardContent } from './ui/card';
-import { Send, Bot, User as UserIcon, Loader2, Paperclip, X, Image as ImageIcon, Mic, Search, Video, Plus, MessageSquare, Pencil, Check, Trash2, Download, UploadCloud, Play, Settings, Info, FolderSync, Copy, Wand2, Globe, Volume2, MoreVertical, Pin, ChevronUp, ChevronDown, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Send, Bot, User as UserIcon, Loader2, Paperclip, X, Image as ImageIcon, Mic, Search, Video, Plus, MessageSquare, Pencil, Check, Trash2, Download, UploadCloud, Play, Settings, Info, FolderSync, Copy, Wand2, Globe, Volume2, MoreVertical, Pin, ChevronUp, ChevronDown, ChevronLeft, ChevronRight, Lightbulb } from 'lucide-react';
 import Markdown from 'react-markdown';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogClose, DialogTrigger } from './ui/dialog';
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from './ui/sheet';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from './ui/dropdown-menu';
 import { Avatar, AvatarImage, AvatarFallback } from './ui/avatar';
 import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip';
@@ -22,6 +23,14 @@ import { useTranslation } from 'react-i18next';
 import TextareaAutosize from 'react-textarea-autosize';
 import { TechStackSelector, TECH_STACKS } from './TechStackSelector';
 import { Github } from 'lucide-react';
+
+export interface Spark {
+  id: string;
+  text: string;
+  attachments: string[];
+  status: 'draft' | 'enhanced' | 'deployed';
+  createdAt: number;
+}
 
 const isArabic = (text: string) => /[\u0600-\u06FF]/.test(text || '');
 
@@ -68,7 +77,7 @@ function ActionableCodeBlock({ payload, targetIde, userId }: { payload: string, 
   };
 
   return (
-    <Card className="my-4 border-border bg-zinc-950 overflow-hidden shadow-lg">
+    <Card className="my-4 border-border bg-zinc-950 overflow-hidden shadow-lg h-auto">
       <div className="flex items-center justify-between px-4 py-2 bg-zinc-900 border-b border-zinc-800">
         <div className="flex items-center gap-2">
           <div className="w-3 h-3 rounded-full bg-red-500/20 border border-red-500/50" />
@@ -86,15 +95,13 @@ function ActionableCodeBlock({ payload, targetIde, userId }: { payload: string, 
           {isCopied ? <><Check className="w-3 h-3" /> Copied!</> : <><Copy className="w-3 h-3" /> Copy Payload</>}
         </Button>
       </div>
-      <CardContent className="p-0">
-        <ScrollArea className="max-h-[400px]">
-          <pre 
-            className={`p-4 text-zinc-300 whitespace-pre-wrap break-words ${sizeClass}`}
-            style={fontStyle}
-          >
-            {payload}
-          </pre>
-        </ScrollArea>
+      <CardContent className="p-0 flex flex-col h-auto">
+        <pre 
+          className={`p-4 pb-6 text-zinc-300 whitespace-pre-wrap break-words ${sizeClass}`}
+          style={fontStyle}
+        >
+          {payload}
+        </pre>
       </CardContent>
     </Card>
   );
@@ -369,10 +376,17 @@ export function NexusChat({ user, isSidebarOpen = true }: { user: User; isSideba
   const [pendingSettings, setPendingSettings] = useState<any>({});
   const [activeTool, setActiveTool] = useState<'image' | 'search' | 'tts' | null>(null);
 
+  const [isSparksOpen, setIsSparksOpen] = useState(false);
+  const [newSparkText, setNewSparkText] = useState('');
+  const [isEnhancingSparkId, setIsEnhancingSparkId] = useState<string | null>(null);
+  const [isSparkFileUploading, setIsSparkFileUploading] = useState(false);
+  const sparkFileInputRef = useRef<HTMLInputElement>(null);
+
   const [isListening, setIsListening] = useState(false);
   const isListeningRef = useRef(false);
   const recognitionRef = useRef<any>(null);
   const inputRef = useRef<string>(input);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
     inputRef.current = input;
@@ -430,6 +444,11 @@ export function NexusChat({ user, isSidebarOpen = true }: { user: User; isSideba
         recognitionRef.current?.start();
         setIsListening(true);
         isListeningRef.current = true;
+        
+        // Force focus directly into the text input immediately upon dictation start
+        if (textareaRef.current) {
+          textareaRef.current.focus();
+        }
       } catch (e) {
         console.error('Failed to start speech recognition', e);
       }
@@ -534,6 +553,51 @@ export function NexusChat({ user, isSidebarOpen = true }: { user: User; isSideba
         ...settingsToUpdate,
         updatedAt: serverTimestamp()
       });
+    }
+  };
+
+  const handleAddSpark = async () => {
+    if (!newSparkText.trim()) return;
+    const currentSparks = sessions.find((s: any) => s.id === sessionId)?.sparks || [];
+    const newSpark: Spark = {
+      id: `spark-${Date.now()}`,
+      text: newSparkText.trim(),
+      attachments: [],
+      status: 'draft',
+      createdAt: Date.now()
+    };
+    await updateChatSettings({ sparks: [...currentSparks, newSpark] });
+    setNewSparkText('');
+  };
+
+  const handleDeleteSpark = async (sparkId: string) => {
+    const currentSparks = sessions.find((s: any) => s.id === sessionId)?.sparks || [];
+    await updateChatSettings({ sparks: currentSparks.filter((s: Spark) => s.id !== sparkId) });
+  };
+
+  const handleDeploySpark = async (sparkText: string, sparkId: string) => {
+    setInput(sparkText);
+    const currentSparks = sessions.find((s: any) => s.id === sessionId)?.sparks || [];
+    await updateChatSettings({ 
+      sparks: currentSparks.map((s: Spark) => s.id === sparkId ? { ...s, status: 'deployed' } : s) 
+    });
+    // Let the standard sendMessage engine absorb the input text naturally!
+    setIsSparksOpen(false);
+  };
+
+  const handleEnhanceSpark = async (sparkText: string, sparkId: string) => {
+    setIsEnhancingSparkId(sparkId);
+    try {
+      const enhancePrompt = `Take this rough idea: '${sparkText}'. Rewrite it into a clear, structured prompt for an AI assistant, keeping it concise.`;
+      const enhancedText = await fastTask(enhancePrompt);
+      const currentSparks = sessions.find((s: any) => s.id === sessionId)?.sparks || [];
+      await updateChatSettings({ 
+        sparks: currentSparks.map((s: Spark) => s.id === sparkId ? { ...s, text: enhancedText, status: 'enhanced' } : s) 
+      });
+    } catch (e) {
+      console.error("Failed to enhance spark", e);
+    } finally {
+      setIsEnhancingSparkId(null);
     }
   };
 
@@ -901,8 +965,15 @@ export function NexusChat({ user, isSidebarOpen = true }: { user: User; isSideba
           complexityModeName: activeMode?.name,
           complexityModeRules: activeMode?.rules,
           techStackContext,
-          githubRepo: activeSettingsData.githubRepo || ''
+          githubRepo: activeSettingsData.githubRepo || '',
+          sparksContext: ''
         };
+
+        const activeSparks = (currentSession?.sparks || []).filter((s: Spark) => s.status !== 'deployed');
+        if (activeSparks.length > 0) {
+          const sparkTexts = activeSparks.map((s: Spark) => s.text).join(' | ');
+          activeSettings.sparksContext = `[PRIVATE USER SPARKS]: The user has the following unsubmitted drafts/ideas: "${sparkTexts}". Use this to understand their deeper intent and align your responses to their overall goals. CRITICAL: DO NOT mention these sparks proactively. Act as if you don't know they exist unless the user directly brings them up.`;
+        }
 
         const stream = await chatWithNexus(history, userMessage, model, activeSettings);
         setProcessingAction(null); // Clear loading spinner instantly
@@ -911,14 +982,48 @@ export function NexusChat({ user, isSidebarOpen = true }: { user: User; isSideba
         setMessages(prev => [...prev, { id: aiMsgId, role: 'model', content: '', timestamp: null, parentId: userDocRef.id }]);
         setActiveLeafId(aiMsgId);
 
-        for await (const chunk of stream) {
-          fullResponse += chunk.text;
-          setMessages(prevMessages => 
-            prevMessages.map(msg => 
-              msg.id === aiMsgId ? { ...msg, content: fullResponse } : msg
-            )
-          );
+        let pendingBuffer = "";
+        let displayedText = "";
+        let isNetworkDone = false;
+
+        const flushInterval = setInterval(() => {
+          if (pendingBuffer.length > 0) {
+            const charsToPull = pendingBuffer.substring(0, 3); 
+            pendingBuffer = pendingBuffer.substring(3);
+            displayedText += charsToPull;
+
+            setMessages(prevMessages =>
+              prevMessages.map(msg =>
+                msg.id === aiMsgId ? { ...msg, content: displayedText } : msg
+              )
+            );
+          } else if (isNetworkDone) {
+            clearInterval(flushInterval);
+          }
+        }, 15);
+
+        try {
+          for await (const chunk of stream) {
+            if (chunk.text) {
+              fullResponse += chunk.text;
+              pendingBuffer += chunk.text;
+            }
+          }
+        } catch (error) {
+          console.error("Stream error:", error);
+        } finally {
+          isNetworkDone = true;
         }
+
+        // Suspend the main async function until the typewriter completely drains its buffer to UI
+        await new Promise<void>((resolve) => {
+          const checkDrain = setInterval(() => {
+            if (isNetworkDone && pendingBuffer.length === 0) {
+              clearInterval(checkDrain);
+              resolve();
+            }
+          }, 30);
+        });
 
         const aiDocRefResult = await addDoc(collection(db, `chatSessions/${targetSessionId}/messages`), {
           sessionId: targetSessionId,
@@ -1185,7 +1290,11 @@ export function NexusChat({ user, isSidebarOpen = true }: { user: User; isSideba
                     const tech = TECH_STACKS.find(t => t.id === id);
                     if (!tech) return null;
                     const Icon = tech.icon;
-                    return <Icon key={id} title={tech.label} className="w-3.5 h-3.5 text-zinc-400 hover:text-zinc-200 transition-colors" />;
+                    return (
+                      <span key={id} title={tech.label}>
+                        <Icon className="w-3.5 h-3.5 text-zinc-400 hover:text-zinc-200 transition-colors" />
+                      </span>
+                    );
                   });
                 })()}
                 {sessions.find(s => s.id === sessionId)?.githubRepo && (
@@ -1196,10 +1305,103 @@ export function NexusChat({ user, isSidebarOpen = true }: { user: User; isSideba
               </div>
             ) : null}
           </div>
-          <Dialog>
-            <DialogTrigger render={<Button variant="ghost" size="icon" className="text-muted-foreground hover:text-foreground" />}>
-              <Settings className="w-5 h-5" />
-            </DialogTrigger>
+
+          <div className="flex items-center">
+            <Sheet open={isSparksOpen} onOpenChange={setIsSparksOpen}>
+              <SheetTrigger>
+                <div role="button" aria-label="Sparks" className="group relative w-10 h-10 inline-flex items-center justify-center text-muted-foreground hover:text-foreground">
+                  <Lightbulb className={`w-5 h-5 transition-all ${
+                    (sessions.find(s => s.id === sessionId)?.sparks || []).filter((s: Spark) => s.status !== 'deployed').length > 0 
+                      ? 'text-yellow-400 animate-pulse drop-shadow-[0_0_8px_rgba(250,204,21,0.6)]' 
+                      : 'group-hover:text-yellow-400'
+                  }`} />
+                </div>
+              </SheetTrigger>
+              <SheetContent className="w-[400px] sm:w-[540px] overflow-y-auto custom-scrollbar bg-zinc-950 border-s border-zinc-800">
+                <SheetHeader>
+                  <SheetTitle className="text-xl font-bold flex items-center gap-2">
+                    <Lightbulb className="w-5 h-5 text-yellow-400" />
+                    {t('sparks_title') || 'Sparks'}
+                  </SheetTitle>
+                </SheetHeader>
+                <div className="mt-6 flex flex-col gap-6">
+                  {/* Create New Spark */}
+                  <div className="flex flex-col">
+                    <TextareaAutosize 
+                      value={newSparkText} 
+                      onChange={(e) => setNewSparkText(e.target.value)}
+                      placeholder={t('new_spark') || 'Draft a new thought...'}
+                      className="bg-zinc-900/50 border border-zinc-800 rounded-xl p-3 focus:outline-none focus:ring-1 focus:ring-primary/50 text-sm placeholder:text-zinc-500 w-full resize-none"
+                      minRows={3}
+                    />
+                    <button 
+                      type="button"
+                      onClick={handleAddSpark}
+                      disabled={!newSparkText.trim()} 
+                      className="mt-2 w-full flex items-center justify-center gap-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 py-2 rounded-lg text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      <Plus className="h-4 w-4" /> {t('add_spark')}
+                    </button>
+                  </div>
+
+                  {/* Spark List */}
+                  <div className="flex flex-col gap-3">
+                    {(sessions.find(s => s.id === sessionId)?.sparks || []).slice().reverse().map((spark: Spark) => (
+                      <div key={spark.id} className="relative bg-zinc-900/50 border border-zinc-800 rounded-xl p-4 shadow-sm hover:border-zinc-700 transition-colors group">
+                        <div className="flex justify-between items-start gap-4">
+                          <p className={`text-sm whitespace-pre-wrap leading-relaxed ${spark.status === 'deployed' ? 'line-through text-zinc-500' : 'text-zinc-200'}`}>
+                            {spark.text}
+                          </p>
+                          <div className="flex flex-col gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <Button variant="ghost" size="icon" className="h-6 w-6 text-zinc-500 hover:text-destructive" onClick={() => handleDeleteSpark(spark.id)}>
+                              <Trash2 className="w-3 h-3" />
+                            </Button>
+                          </div>
+                        </div>
+                        {spark.status !== 'deployed' && (
+                          <div className="flex items-center gap-2 mt-4 pt-3 border-t border-zinc-800/50">
+                            <Button 
+                              variant="secondary" 
+                              size="sm" 
+                              className="h-7 text-xs bg-zinc-800 hover:bg-zinc-700 text-zinc-300 flex-1"
+                              onClick={() => handleEnhanceSpark(spark.text, spark.id)}
+                              disabled={isEnhancingSparkId === spark.id}
+                            >
+                              {isEnhancingSparkId === spark.id ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : <Wand2 className="w-3 h-3 mr-1 text-purple-400" />}
+                              {t('enhance_spark') || 'Enhance Idea'}
+                            </Button>
+                            <Button 
+                              variant="default" 
+                              size="sm" 
+                              className="h-7 text-xs flex-1 bg-primary/20 text-primary hover:bg-primary/30"
+                              onClick={() => handleDeploySpark(spark.text, spark.id)}
+                            >
+                              <Send className="w-3 h-3 mr-1" />
+                              {t('deploy_spark') || 'Send to Chat'}
+                            </Button>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                    {(sessions.find(s => s.id === sessionId)?.sparks || []).length === 0 && (
+                      <div className="flex flex-col items-center justify-center h-48 text-center px-4 mt-10">
+                        <div className="h-12 w-12 rounded-full bg-zinc-800/50 flex items-center justify-center mb-4">
+                          <Lightbulb className="h-6 w-6 text-zinc-500" />
+                        </div>
+                        <p className="text-zinc-500 text-sm leading-relaxed">
+                          {t('empty_sparks') || 'Your scratchpad is empty. Jot down a brilliant idea!'}
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </SheetContent>
+            </Sheet>
+
+            <Dialog>
+              <DialogTrigger render={<Button variant="ghost" size="icon" className="text-muted-foreground hover:text-foreground" />}>
+                <Settings className="w-5 h-5" />
+              </DialogTrigger>
             <DialogContent className="sm:max-w-[425px]">
               <DialogHeader>
                 <DialogTitle className="pe-8">{t('session_settings')}</DialogTitle>
@@ -1419,6 +1621,7 @@ export function NexusChat({ user, isSidebarOpen = true }: { user: User; isSideba
               </div>
             </DialogContent>
           </Dialog>
+          </div>
         </div>
         {isDragging && (
           <div className="absolute inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm border-2 border-dashed border-primary m-4 rounded-xl transition-all duration-200">
@@ -1516,6 +1719,8 @@ export function NexusChat({ user, isSidebarOpen = true }: { user: User; isSideba
               </Button>
             <Button 
               type="button" 
+              tabIndex={-1}
+              onKeyDown={(e) => { if (e.key === 'Enter') e.preventDefault(); }}
               variant="ghost" 
               size="icon" 
               onClick={toggleListening} 
@@ -1526,20 +1731,43 @@ export function NexusChat({ user, isSidebarOpen = true }: { user: User; isSideba
             </Button>
             <input type="file" ref={fileInputRef} onChange={handleFileChange} className="hidden" accept="image/*,video/*,audio/*" />
             <TextareaAutosize 
+              ref={textareaRef}
               dir={i18n.language.startsWith('ar') ? 'rtl' : 'ltr'}
               value={input} 
               onPaste={handlePaste}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && !e.shiftKey) {
-                  e.preventDefault();
+                  e.preventDefault(); // Prevent newline
                   
+                  // STAGE 1: We are actively listening
                   if (isListening) {
                     recognitionRef.current?.stop();
                     setIsListening(false);
                     isListeningRef.current = false;
+                    
+                    // Wait a tick for React state to update the input with the final transcript
+                    setTimeout(async () => {
+                      if (textareaRef.current) {
+                        // Steal focus from the mic button and highlight everything
+                        textareaRef.current.focus();
+                        textareaRef.current.select();
+                        
+                        // Conditionally copy to clipboard based on user settings
+                        if (globalDefaults.autoCopyVoice && textareaRef.current.value.trim()) {
+                          try {
+                            await navigator.clipboard.writeText(textareaRef.current.value);
+                          } catch (err) {
+                            console.error("Failed to auto-copy:", err);
+                          }
+                        }
+                      }
+                    }, 150); 
+                    
+                    return; // Abort here. Do not send the message yet.
                   }
 
+                  // STAGE 2: Not listening, act as a normal submit
                   if (!isLoading && (input.trim() || file)) {
                     sendMessage();
                   }

@@ -62,7 +62,7 @@ export async function chatWithNexus(
   history: { role: 'user' | 'model', parts: { text: string }[] }[], 
   message: string, 
   model: 'gemini-3.1-pro-preview' | 'gemini-3-flash-preview' | 'gemini-3.1-flash-lite-preview' = 'gemini-3.1-pro-preview',
-  settings?: { userLang?: string, ideLang?: string, targetIde?: string, customInstructions?: string, complexityModeName?: string, complexityModeRules?: string, techStackContext?: string, githubRepo?: string }
+  settings?: { userLang?: string, ideLang?: string, targetIde?: string, customInstructions?: string, complexityModeName?: string, complexityModeRules?: string, techStackContext?: string, githubRepo?: string, sparksContext?: string }
 ) {
   const useThinking = model === 'gemini-3.1-pro-preview';
   
@@ -82,6 +82,7 @@ export async function chatWithNexus(
     if (settings.complexityModeRules) dynamicInstruction += `- [Mode_Rules]: ${settings.complexityModeRules}\n`;
     if (settings.techStackContext) dynamicInstruction += `\n**PROJECT TECH STACK & ENVIRONMENT:**\n${settings.techStackContext}\nTailor your code and answers strictly to these technologies.\n`;
     if (settings.githubRepo) dynamicInstruction += `\n**PROJECT REPOSITORY REFERENCE:**\n${settings.githubRepo}\n`;
+    if (settings.sparksContext) dynamicInstruction += `\n\n${settings.sparksContext}\n`;
   }
 
   const chatWithHistory = ai.chats.create({

@@ -39,7 +39,7 @@ export function GlobalSettings() {
       <SheetTrigger render={<Button variant="ghost" size="icon" className="text-muted-foreground hover:text-foreground" />}>
         <Settings className="w-5 h-5" />
       </SheetTrigger>
-      <SheetContent className="w-[400px] sm:w-[540px] overflow-y-auto">
+      <SheetContent className="w-[400px] sm:w-[540px] overflow-y-auto custom-scrollbar">
         <SheetHeader>
           <SheetTitle>{t('global_settings_hub')}</SheetTitle>
         </SheetHeader>
@@ -67,7 +67,7 @@ export function GlobalSettings() {
                     <SelectTrigger className="bg-zinc-900/50 border-zinc-800 focus:ring-1 focus:ring-zinc-700 rounded-lg">
                       <SelectValue />
                     </SelectTrigger>
-                    <SelectContent className="z-[9999]" position="popper">
+                    <SelectContent className="z-[9999]">
                       <SelectItem value="system">{t('font_system')}</SelectItem>
                       <SelectItem value="cairo">{t('font_cairo')}</SelectItem>
                       <SelectItem value="tajawal">{t('font_tajawal')}</SelectItem>
@@ -84,7 +84,7 @@ export function GlobalSettings() {
                     <SelectTrigger className="bg-zinc-900/50 border-zinc-800 focus:ring-1 focus:ring-zinc-700 rounded-lg">
                       <SelectValue />
                     </SelectTrigger>
-                    <SelectContent className="z-[9999]" position="popper">
+                    <SelectContent className="z-[9999]">
                       <SelectItem value="small">{t('size_small')}</SelectItem>
                       <SelectItem value="medium">{t('size_medium')}</SelectItem>
                       <SelectItem value="large">{t('size_large')}</SelectItem>
@@ -201,6 +201,21 @@ export function GlobalSettings() {
                 </SelectContent>
               </Select>
             </div>
+
+            <div className="flex items-center justify-between p-3 bg-zinc-900/50 border border-zinc-800 rounded-lg mt-4">
+              <div className="space-y-0.5">
+                <Label className="text-sm font-medium text-zinc-200">{t('auto_copy_voice')}</Label>
+                <p className="text-xs text-zinc-500">Automatically copy transcribed text on Enter.</p>
+              </div>
+              <input
+                type="checkbox"
+                title={t('auto_copy_voice') || 'Auto Copy Voice'}
+                checked={globalDefaults.autoCopyVoice || false}
+                onChange={(e) => updateGlobalDefaults({ autoCopyVoice: e.target.checked })}
+                className="h-4 w-4 bg-zinc-800 border-zinc-700 rounded rounded-md focus:ring-primary text-primary"
+              />
+            </div>
+
             <div className="space-y-2">
               <Label className="text-sm font-medium text-zinc-200">{t('default_target_ide')}</Label>
               <p className="text-xs text-zinc-500">{t('target_ide_desc')}</p>
