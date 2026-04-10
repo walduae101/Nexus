@@ -163,6 +163,19 @@ function MessageBubble({ msg, user, sessionId, sessions, globalDefaults, isArabi
   const [isEditing, setIsEditing] = useState(false);
   const [editText, setEditText] = useState(msg.content);
 
+  const textRef = useRef<HTMLDivElement>(null);
+  const [isExpanded, setIsExpanded] = useState(false);
+  const [isOverflowing, setIsOverflowing] = useState(false);
+
+  useEffect(() => {
+    // Only calculate overflow for user messages, and only when it's clamped (not expanded)
+    if (msg.role === 'user' && textRef.current && !isExpanded) {
+      const { scrollHeight, clientHeight } = textRef.current;
+      // If scrollHeight is strictly greater than the clamped clientHeight, it's overflowing
+      setIsOverflowing(scrollHeight > clientHeight);
+    }
+  }, [msg.content, msg.role]);
+
   const content = msg.content;
   const isMsgArabic = isArabic(content);
 
@@ -280,31 +293,48 @@ function MessageBubble({ msg, user, sessionId, sessions, globalDefaults, isArabi
                 </div>
              </div>
           ) : (
-            <div dir={isMsgArabic ? "rtl" : "ltr"} className={`markdown-body prose ${msg.role === 'user' ? 'prose-invert prose-headings:text-primary-foreground prose-a:text-primary-foreground' : 'prose-invert'} max-w-none prose-p:leading-relaxed prose-pre:bg-zinc-950 prose-pre:border prose-pre:border-zinc-800 text-start`}>
-              <Markdown
-                components={{
-                  code({ node, inline, className, children, ...props }: any) {
-                    const rawText = String(children).replace(/\n$/, '');
-                    const meta = node?.data?.meta || '';
-                    const isAntigravity = 
-                      className?.includes('[COPY THIS TO ANTIGRAVITY IDE]') || 
-                      meta.includes('[COPY THIS TO ANTIGRAVITY IDE]') ||
-                      rawText.includes('[COPY THIS TO ANTIGRAVITY IDE]');
-                    
-                    if (!inline && isAntigravity) {
-                      const payload = rawText.replace(/\[COPY THIS TO ANTIGRAVITY IDE\]/g, '').trim();
-                      const currentSession = sessions.find((s: any) => s.id === sessionId);
-                      const targetIde = currentSession?.targetIde || globalDefaults.targetIde;
-                      return <ActionableCodeBlock payload={payload} targetIde={targetIde} userId={user.uid} />;
-                    }
-                    
-                    return <code className={className} {...props}>{children}</code>;
-                  }
-                }}
+            <>
+              <div 
+                ref={msg.role === 'user' ? textRef : null}
+                dir={isMsgArabic ? "rtl" : "ltr"} 
+                className={`markdown-body prose ${msg.role === 'user' ? 'prose-invert prose-headings:text-primary-foreground prose-a:text-primary-foreground' : 'prose-invert'} max-w-none prose-p:leading-relaxed prose-pre:bg-zinc-950 prose-pre:border prose-pre:border-zinc-800 text-start ${msg.role === 'user' && !isExpanded ? 'line-clamp-5 overflow-hidden break-words' : 'break-words'}`}
               >
-                {content}
-              </Markdown>
-            </div>
+                <Markdown
+                  components={{
+                    code({ node, inline, className, children, ...props }: any) {
+                      const rawText = String(children).replace(/\n$/, '');
+                      const meta = node?.data?.meta || '';
+                      const isAntigravity = 
+                        className?.includes('[COPY THIS TO ANTIGRAVITY IDE]') || 
+                        meta.includes('[COPY THIS TO ANTIGRAVITY IDE]') ||
+                        rawText.includes('[COPY THIS TO ANTIGRAVITY IDE]');
+                      
+                      if (!inline && isAntigravity) {
+                        const payload = rawText.replace(/\[COPY THIS TO ANTIGRAVITY IDE\]/g, '').trim();
+                        const currentSession = sessions.find((s: any) => s.id === sessionId);
+                        const targetIde = currentSession?.targetIde || globalDefaults.targetIde;
+                        return <ActionableCodeBlock payload={payload} targetIde={targetIde} userId={user.uid} />;
+                      }
+                      
+                      return <code className={className} {...props}>{children}</code>;
+                    }
+                  }}
+                >
+                  {content}
+                </Markdown>
+              </div>
+              {msg.role === 'user' && isOverflowing && (
+                <div className="mt-2 flex justify-center border-t border-black/10 dark:border-white/10 pt-1">
+                  <button 
+                    onClick={(e) => { e.stopPropagation(); setIsExpanded(!isExpanded); }}
+                    className="p-1 text-inherit opacity-70 hover:opacity-100 transition-opacity rounded-full hover:bg-black/5 dark:hover:bg-white/5"
+                    title={isExpanded ? "Show Less" : "Show More"}
+                  >
+                    {isExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                  </button>
+                </div>
+              )}
+            </>
           )}
         </div>
         {!isEditing && (
