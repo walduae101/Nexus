@@ -31,6 +31,9 @@ export interface GlobalDefaults {
   complexityMode: string;
   spokenLanguage: string;
   hasCompletedOnboarding?: boolean;
+  fontFamily: string;
+  fontSize: string;
+  globalTechStack?: string[];
 }
 
 interface SettingsContextType {
@@ -93,7 +96,10 @@ export const SettingsProvider: React.FC<{ user: User | null; children: React.Rea
       customInstructions: '',
       complexityMode: 'premade-specific',
       spokenLanguage: 'en-US',
-      hasCompletedOnboarding: false
+      hasCompletedOnboarding: false,
+      fontFamily: 'system',
+      fontSize: 'medium',
+      globalTechStack: []
     };
   });
 

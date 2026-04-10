@@ -1,6 +1,6 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { User } from 'firebase/auth';
-import { collection, query, orderBy, onSnapshot, addDoc, serverTimestamp, doc, setDoc, where, updateDoc, deleteDoc, getDocs } from 'firebase/firestore';
+import { collection, query, orderBy, onSnapshot, addDoc, serverTimestamp, doc, setDoc, where, updateDoc, deleteDoc, getDocs, limit } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType, storage } from '../lib/firebase';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { chatWithNexus, generateImage, searchGrounding, textToSpeech, analyzeMedia, transcribeAudio, fastTask } from '../lib/gemini';
@@ -20,11 +20,42 @@ import { motion } from 'motion/react';
 import { useSettings } from '../contexts/SettingsContext';
 import { useTranslation } from 'react-i18next';
 import TextareaAutosize from 'react-textarea-autosize';
+import { TechStackSelector, TECH_STACKS } from './TechStackSelector';
+import { Github } from 'lucide-react';
 
 const isArabic = (text: string) => /[\u0600-\u06FF]/.test(text || '');
 
+function MessageCopyButton({ text }: { text: string }) {
+  const [isCopied, setIsCopied] = useState(false);
+
+  const handleCopy = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    try {
+      await navigator.clipboard.writeText(text);
+      setIsCopied(true);
+      setTimeout(() => setIsCopied(false), 2000);
+    } catch (err) {
+      console.error('Failed to copy!', err);
+    }
+  };
+
+  return (
+    <button 
+      onClick={handleCopy}
+      className="p-1.5 text-zinc-400 hover:text-zinc-200 bg-zinc-900/50 hover:bg-zinc-800 rounded-md transition-all duration-200"
+      title="Copy message"
+    >
+      {isCopied ? <Check className="h-3.5 w-3.5 text-emerald-400" /> : <Copy className="h-3.5 w-3.5" />}
+    </button>
+  );
+}
+
 function ActionableCodeBlock({ payload, targetIde, userId }: { payload: string, targetIde: string, userId: string }) {
   const [isCopied, setIsCopied] = useState(false);
+  const { globalDefaults: settings } = useSettings();
+
+  const sizeClass = settings.fontSize === 'small' ? 'text-sm' : settings.fontSize === 'large' ? 'text-lg' : 'text-base';
+  const fontStyle = settings.fontFamily === 'cairo' ? { fontFamily: "'Cairo', sans-serif" } : settings.fontFamily === 'tajawal' ? { fontFamily: "'Tajawal', sans-serif" } : {};
 
   const handleCopy = async () => {
     try {
@@ -57,7 +88,10 @@ function ActionableCodeBlock({ payload, targetIde, userId }: { payload: string, 
       </div>
       <CardContent className="p-0">
         <ScrollArea className="max-h-[400px]">
-          <pre className="p-4 text-sm font-mono text-zinc-300 whitespace-pre-wrap break-all">
+          <pre 
+            className={`p-4 text-zinc-300 whitespace-pre-wrap break-words ${sizeClass}`}
+            style={fontStyle}
+          >
             {payload}
           </pre>
         </ScrollArea>
@@ -118,26 +152,51 @@ function LoadingBubble({ action }: { action: 'text' | 'image' | 'tts' | 'search'
   );
 }
 
-function MessageBubble({ msg, user, isStreaming, streamingContent, sessionId, sessions, globalDefaults, isArabic, t }: any) {
-  const [isExpanded, setIsExpanded] = useState(false);
-  const [hasOverflow, setHasOverflow] = useState(false);
-  const textRef = useRef<HTMLDivElement>(null);
+function MessageBubble({ msg, user, sessionId, sessions, globalDefaults, isArabic, t, messages, activeLeafId, setActiveLeafId, onEditSubmit, onDelete }: any) {
+  const [isEditing, setIsEditing] = useState(false);
+  const [editText, setEditText] = useState(msg.content);
 
-  const content = isStreaming ? streamingContent : msg.content;
+  const content = msg.content;
   const isMsgArabic = isArabic(content);
 
-  useEffect(() => {
-    if (textRef.current) {
-      setHasOverflow(textRef.current.scrollHeight > textRef.current.clientHeight);
+  const siblings = messages ? messages.filter((m: any) => m.parentId === msg.parentId && m.role === msg.role) : [];
+  if (siblings.length > 0) {
+    siblings.sort((a: any, b: any) => {
+      const tA = a.timestamp?.toMillis?.() || new Date(a.timestamp).getTime() || 0;
+      const tB = b.timestamp?.toMillis?.() || new Date(b.timestamp).getTime() || 0;
+      return tA - tB;
+    });
+  }
+  const currentIndex = siblings.findIndex((m: any) => m.id === msg.id);
+
+  const navigateBranch = (dir: number) => {
+    const targetSibling = siblings[currentIndex + dir];
+    if (!targetSibling) return;
+    
+    let currentDeepest = targetSibling.id;
+    let keepSearching = true;
+    while(keepSearching) {
+      const children = messages.filter((m: any) => m.parentId === currentDeepest);
+      if (children.length > 0) {
+        children.sort((a: any, b: any) => {
+           const tA = a.timestamp?.toMillis?.() || new Date(a.timestamp).getTime() || 0;
+           const tB = b.timestamp?.toMillis?.() || new Date(b.timestamp).getTime() || 0;
+           return tB - tA; // newest first
+        });
+        currentDeepest = children[0].id;
+      } else {
+        keepSearching = false;
+      }
     }
-  }, [content]);
+    setActiveLeafId(currentDeepest);
+  };
 
   return (
     <motion.div 
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.3 }}
-      className={`flex gap-4 ${msg.role === 'user' ? 'flex-row-reverse' : ''}`}
+      className={`flex gap-4 group ${msg.role === 'user' ? 'flex-row-reverse' : ''}`}
     >
       <Avatar className="w-8 h-8 shrink-0">
         {msg.role === 'user' ? (
@@ -154,20 +213,32 @@ function MessageBubble({ msg, user, isStreaming, streamingContent, sessionId, se
           </>
         )}
       </Avatar>
-      <div className={`max-w-[80%] rounded-2xl p-4 ${msg.role === 'user' ? 'bg-primary text-primary-foreground' : msg.role === 'system' ? 'bg-destructive/20 text-destructive border border-destructive/50' : 'bg-muted text-foreground'}`}>
+      <div className={`relative max-w-[80%] rounded-2xl p-4 ${msg.role === 'user' ? 'bg-primary text-primary-foreground' : msg.role === 'system' ? 'bg-destructive/20 text-destructive border border-destructive/50' : 'bg-muted text-foreground'}`}>
+        
+        {siblings.length > 1 && (
+          <div className={`flex items-center gap-2 mb-2 text-xs font-mono font-bold ${msg.role === 'user' ? 'text-primary-foreground/70' : 'text-muted-foreground'}`}>
+            <button onClick={() => navigateBranch(-1)} disabled={currentIndex === 0} className="hover:text-current disabled:opacity-30"> <ChevronLeft className="w-3 h-3" /> </button>
+            <span>{currentIndex + 1} / {siblings.length}</span>
+            <button onClick={() => navigateBranch(1)} disabled={currentIndex === siblings.length - 1} className="hover:text-current disabled:opacity-30"> <ChevronRight className="w-3 h-3" /> </button>
+          </div>
+        )}
+
         {msg.attachmentUrl && msg.attachmentType?.startsWith('image/') && (
-          <Card className="mb-3 overflow-hidden border-border bg-muted/30">
-            <CardContent className="p-2 relative group">
-              <img src={msg.attachmentUrl} alt="Attachment" className="max-w-full rounded-md" />
-              <a 
-                href={msg.attachmentUrl} 
-                download="generated-image.png" 
-                target="_blank" 
-                rel="noreferrer"
-                className="absolute top-4 end-4 bg-background/80 hover:bg-background p-2 rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
-              >
-                <Download className="w-4 h-4 text-foreground" />
-              </a>
+          <Card className={`mb-3 overflow-hidden border-border bg-muted/30 ${msg.isUploading ? 'opacity-70 animate-pulse' : ''}`}>
+            <CardContent className="p-2 relative group flex items-center justify-center">
+              <img src={msg.attachmentUrl} alt="User attachment" className="max-w-full rounded-md" />
+              {msg.isUploading && <Loader2 className="w-8 h-8 absolute text-primary animate-spin" />}
+              {!msg.isUploading && (
+                <a 
+                  href={msg.attachmentUrl} 
+                  download="generated-image.png" 
+                  target="_blank" 
+                  rel="noreferrer"
+                  className="absolute top-4 end-4 bg-background/80 hover:bg-background p-2 rounded-full opacity-0 group-hover:opacity-100 transition-opacity z-10"
+                >
+                  <Download className="w-4 h-4 text-foreground" />
+                </a>
+              )}
             </CardContent>
           </Card>
         )}
@@ -188,46 +259,82 @@ function MessageBubble({ msg, user, isStreaming, streamingContent, sessionId, se
             </CardContent>
           </Card>
         )}
-        <div className="relative">
-          <div ref={textRef} dir={isMsgArabic ? "rtl" : "ltr"} className={`markdown-body prose ${msg.role === 'user' ? 'prose-invert prose-headings:text-primary-foreground prose-a:text-primary-foreground' : 'prose-invert'} max-w-none prose-p:leading-relaxed prose-pre:bg-zinc-950 prose-pre:border prose-pre:border-zinc-800 text-start ${!isExpanded ? 'line-clamp-5' : ''}`}>
-            <Markdown
-              components={{
-                code({ node, inline, className, children, ...props }: any) {
-                  const rawText = String(children).replace(/\n$/, '');
-                  const meta = node?.data?.meta || '';
-                  const isAntigravity = 
-                    className?.includes('[COPY THIS TO ANTIGRAVITY IDE]') || 
-                    meta.includes('[COPY THIS TO ANTIGRAVITY IDE]') ||
-                    rawText.includes('[COPY THIS TO ANTIGRAVITY IDE]');
-                  
-                  if (!inline && isAntigravity) {
-                    const payload = rawText.replace(/\[COPY THIS TO ANTIGRAVITY IDE\]/g, '').trim();
-                    const currentSession = sessions.find((s: any) => s.id === sessionId);
-                    const targetIde = currentSession?.targetIde || globalDefaults.targetIde;
-                    return <ActionableCodeBlock payload={payload} targetIde={targetIde} userId={user.uid} />;
+        <div className="relative group/content">
+          {isEditing ? (
+             <div className="flex flex-col gap-2 min-w-[250px]">
+                <TextareaAutosize 
+                   value={editText}
+                   onChange={e => setEditText(e.target.value)}
+                   className="w-full bg-zinc-950/50 text-white rounded-md p-2 text-sm max-h-[300px]"
+                />
+                <div className="flex justify-end gap-2 mt-2">
+                   <Button size="sm" variant="ghost" onClick={() => { setIsEditing(false); setEditText(msg.content); }}>Cancel</Button>
+                   <Button size="sm" onClick={() => { setIsEditing(false); onEditSubmit(editText); }}>Save & Submit</Button>
+                </div>
+             </div>
+          ) : (
+            <div dir={isMsgArabic ? "rtl" : "ltr"} className={`markdown-body prose ${msg.role === 'user' ? 'prose-invert prose-headings:text-primary-foreground prose-a:text-primary-foreground' : 'prose-invert'} max-w-none prose-p:leading-relaxed prose-pre:bg-zinc-950 prose-pre:border prose-pre:border-zinc-800 text-start`}>
+              <Markdown
+                components={{
+                  code({ node, inline, className, children, ...props }: any) {
+                    const rawText = String(children).replace(/\n$/, '');
+                    const meta = node?.data?.meta || '';
+                    const isAntigravity = 
+                      className?.includes('[COPY THIS TO ANTIGRAVITY IDE]') || 
+                      meta.includes('[COPY THIS TO ANTIGRAVITY IDE]') ||
+                      rawText.includes('[COPY THIS TO ANTIGRAVITY IDE]');
+                    
+                    if (!inline && isAntigravity) {
+                      const payload = rawText.replace(/\[COPY THIS TO ANTIGRAVITY IDE\]/g, '').trim();
+                      const currentSession = sessions.find((s: any) => s.id === sessionId);
+                      const targetIde = currentSession?.targetIde || globalDefaults.targetIde;
+                      return <ActionableCodeBlock payload={payload} targetIde={targetIde} userId={user.uid} />;
+                    }
+                    
+                    return <code className={className} {...props}>{children}</code>;
                   }
-                  
-                  return <code className={className} {...props}>{children}</code>;
-                }
-              }}
-            >
-              {content}
-            </Markdown>
-          </div>
-          {hasOverflow && (
-            <button 
-              onClick={() => setIsExpanded(!isExpanded)}
-              className={`mt-2 flex items-center gap-1 text-xs font-medium text-zinc-400 hover:text-zinc-200 transition-colors ${isMsgArabic ? 'flex-row-reverse' : ''}`}
-            >
-              {isExpanded ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
-              <span>{isExpanded ? (t('read_less') || 'Read less') : (t('read_more') || 'Read more')}</span>
-            </button>
+                }}
+              >
+                {content}
+              </Markdown>
+            </div>
           )}
         </div>
+        {!isEditing && (
+          <div className={`absolute -bottom-4 ${msg.role === 'user' ? 'start-2' : 'end-2'} flex items-center opacity-0 group-hover:opacity-100 transition-opacity z-10 bg-background/90 rounded-md border shadow-sm p-1 gap-1`}>
+            {msg.role === 'user' && (
+               <>
+                 <button onClick={() => setIsEditing(true)} className="p-1.5 text-zinc-400 hover:text-zinc-200 bg-zinc-900/50 hover:bg-zinc-800 rounded-md transition-all duration-200" title="Edit">
+                   <Pencil className="w-3.5 h-3.5" />
+                 </button>
+                 <button 
+                   onClick={(e) => { e.stopPropagation(); onDelete(msg.id); }}
+                   className="p-1.5 text-zinc-400 hover:text-red-400 bg-zinc-800/50 hover:bg-red-500/10 rounded-md transition-all duration-200"
+                   title={t('delete_message') || 'Delete'}
+                 >
+                   <Trash2 className="w-3.5 h-3.5" />
+                 </button>
+               </>
+            )}
+            <MessageCopyButton text={content} />
+          </div>
+        )}
       </div>
     </motion.div>
   );
 }
+
+export const generateSyncPrompt = (userPreferences?: string) => {
+  const baseInstruction = `I am coordinating our workflow with Nexus. To ensure we stay synchronized, please generate a comprehensive current-state summary of the workspace. Include the latest updates on our modular architecture, the current status of the game logic and UI/UX polish, and any active system-level configurations.`;
+  
+  const ongoingRule = `Moving forward, please provide a brief exportable summary after major changes so I can easily keep Nexus in the loop.`;
+
+  if (userPreferences && userPreferences.trim().length > 0) {
+    return `${baseInstruction}\n\nUSER SPECIFIC PREFERENCES & FOCUS AREAS:\n"""\n${userPreferences.trim()}\n"""\n\n${ongoingRule}`;
+  }
+
+  return `${baseInstruction}\n\n${ongoingRule}`;
+};
 
 export function NexusChat({ user, isSidebarOpen = true }: { user: User; isSidebarOpen?: boolean }) {
   const { t, i18n } = useTranslation();
@@ -235,6 +342,15 @@ export function NexusChat({ user, isSidebarOpen = true }: { user: User; isSideba
   const [sessions, setSessions] = useState<any[]>([]);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [messages, setMessages] = useState<any[]>([]);
+  const [messageLimit, setMessageLimit] = useState(50);
+  const [activeLeafId, setActiveLeafId] = useState<string | null>(null);
+  
+  const observer = useRef<IntersectionObserver | null>(null);
+  const prevScrollHeightRef = useRef<number>(0);
+  const prevScrollTopRef = useRef<number>(0);
+  const isFetchingMoreRef = useRef(false);
+  const loadMoreRef = useRef<HTMLDivElement>(null);
+
   const [input, setInput] = useState('');
   const [processingAction, setProcessingAction] = useState<'text' | 'image' | 'tts' | 'search' | null>(null);
   const [model, setModel] = useState<'gemini-3.1-pro-preview' | 'gemini-3-flash-preview' | 'gemini-3.1-flash-lite-preview'>('gemini-3.1-pro-preview');
@@ -250,12 +366,11 @@ export function NexusChat({ user, isSidebarOpen = true }: { user: User; isSideba
   const [editTitle, setEditTitle] = useState('');
   const [sessionToDelete, setSessionToDelete] = useState<string | null>(null);
 
-  const [streamingMessageId, setStreamingMessageId] = useState<string | null>(null);
-  const [streamingContent, setStreamingContent] = useState('');
   const [pendingSettings, setPendingSettings] = useState<any>({});
   const [activeTool, setActiveTool] = useState<'image' | 'search' | 'tts' | null>(null);
 
   const [isListening, setIsListening] = useState(false);
+  const isListeningRef = useRef(false);
   const recognitionRef = useRef<any>(null);
   const inputRef = useRef<string>(input);
 
@@ -277,6 +392,7 @@ export function NexusChat({ user, isSidebarOpen = true }: { user: User; isSideba
       };
 
       recognition.onresult = (event: any) => {
+        if (!isListeningRef.current) return;
         let interimTranscript = '';
         for (let i = event.resultIndex; i < event.results.length; ++i) {
           if (event.results[i].isFinal) {
@@ -295,6 +411,7 @@ export function NexusChat({ user, isSidebarOpen = true }: { user: User; isSideba
 
       recognition.onend = () => {
         setIsListening(false);
+        isListeningRef.current = false;
       };
 
       recognitionRef.current = recognition;
@@ -304,6 +421,7 @@ export function NexusChat({ user, isSidebarOpen = true }: { user: User; isSideba
   const toggleListening = () => {
     if (isListening) {
       recognitionRef.current?.stop();
+      isListeningRef.current = false;
     } else {
       try {
         if (recognitionRef.current) {
@@ -311,6 +429,7 @@ export function NexusChat({ user, isSidebarOpen = true }: { user: User; isSideba
         }
         recognitionRef.current?.start();
         setIsListening(true);
+        isListeningRef.current = true;
       } catch (e) {
         console.error('Failed to start speech recognition', e);
       }
@@ -359,6 +478,22 @@ export function NexusChat({ user, isSidebarOpen = true }: { user: User; isSideba
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
+  const handlePaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+
+    for (let i = 0; i < items.length; i++) {
+      if (items[i].type.indexOf('image') === 0) {
+        e.preventDefault(); // Prevent default text pasting behavior for images
+        const pastedFile = items[i].getAsFile();
+        if (pastedFile) {
+          setFile(pastedFile);
+          setPreviewUrl(URL.createObjectURL(pastedFile));
+        }
+      }
+    }
+  };
+
   useEffect(() => {
     const q = query(collection(db, 'chatSessions'), where('userId', '==', user.uid), orderBy('updatedAt', 'desc'));
     const unsubscribe = onSnapshot(q, (snapshot) => {
@@ -386,6 +521,7 @@ export function NexusChat({ user, isSidebarOpen = true }: { user: User; isSideba
   const createNewSession = () => {
     setSessionId(null);
     setMessages([]);
+    setMessageLimit(50);
     setPendingSettings({});
   };
 
@@ -443,17 +579,44 @@ export function NexusChat({ user, isSidebarOpen = true }: { user: User; isSideba
   useEffect(() => {
     if (!sessionId) {
       setMessages([]);
+      setActiveLeafId(null);
       return;
     }
-    setMessages([]); // Clear buffer instantly on session switch
-    const q = query(collection(db, `chatSessions/${sessionId}/messages`), orderBy('timestamp', 'asc'));
+    const currentSession = sessions.find(s => s.id === sessionId);
+    if (currentSession && currentSession.activeLeafId !== undefined) {
+      setActiveLeafId(currentSession.activeLeafId);
+    }
+    
+    // Only clear buffer instantly on a pristine session switch to prevent flash loading on infinite scrolls
+    if (messageLimit === 50 && messages.every((m: any) => m.sessionId !== sessionId)) {
+      setMessages([]); 
+    }
+    const q = query(collection(db, `chatSessions/${sessionId}/messages`), orderBy('timestamp', 'desc'), limit(messageLimit));
     const unsubscribe = onSnapshot(q, (snapshot) => {
-      setMessages(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+      setMessages(prev => {
+        const firestoreMessages = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })).reverse();
+        const optimisticMessages = prev.filter(m => m.id && m.id.toString().startsWith('temp-'));
+        return [...firestoreMessages, ...optimisticMessages];
+      });
     }, (error) => {
       handleFirestoreError(error, OperationType.GET, `chatSessions/${sessionId}/messages`);
     });
     return () => unsubscribe();
-  }, [sessionId]);
+  }, [sessionId, messageLimit, sessions]);
+
+  // Compute activeThread dynamically
+  const activeThread = useMemo(() => {
+    const thread = [];
+    let currentId = activeLeafId || (messages.length > 0 ? messages[messages.length - 1].id : null);
+    
+    while (currentId) {
+      const msg = messages.find((m: any) => m.id === currentId);
+      if (!msg) break;
+      thread.unshift(msg);
+      currentId = msg.parentId || null;
+    }
+    return thread;
+  }, [messages, activeLeafId]);
 
   // Progressive Auto-Titling Engine
   useEffect(() => {
@@ -489,23 +652,99 @@ export function NexusChat({ user, isSidebarOpen = true }: { user: User; isSideba
   }, [messages.length, sessionId, sessions]);
 
   useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    if (!scrollRef.current) return;
+    if (isFetchingMoreRef.current) {
+      const newScrollHeight = scrollRef.current.scrollHeight;
+      scrollRef.current.scrollTop = prevScrollTopRef.current + (newScrollHeight - prevScrollHeightRef.current);
+      isFetchingMoreRef.current = false;
+    } else {
+      const { scrollTop, scrollHeight, clientHeight } = scrollRef.current;
+      const isNearBottom = scrollHeight - scrollTop - clientHeight < 150;
+      if (isNearBottom || messages.length <= 50) { 
+        scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+      }
     }
   }, [messages, isLoading]);
 
-  const sendMessage = async () => {
-    if ((!input.trim() && !file) || isLoading) return;
+  useEffect(() => {
+    if (!loadMoreRef.current) return;
+    observer.current = new IntersectionObserver(entries => {
+      if (entries[0].isIntersecting && messages.length >= messageLimit) {
+        if (scrollRef.current) {
+          prevScrollHeightRef.current = scrollRef.current.scrollHeight;
+          prevScrollTopRef.current = scrollRef.current.scrollTop;
+          isFetchingMoreRef.current = true;
+        }
+        setMessageLimit(prev => prev + 50);
+      }
+    });
+    observer.current.observe(loadMoreRef.current);
     
-    let userMessage = input;
+    return () => {
+      observer.current?.disconnect();
+    };
+  }, [messages.length, messageLimit]);
+
+  const deleteMessageBranch = async (messageId: string) => {
+    if (!window.confirm("Are you sure you want to delete this message and all its replies?")) return;
+
+    const targetMsg = messages.find(m => m.id === messageId);
+    if (!targetMsg) return;
+
+    const idsToDelete = new Set([messageId]);
+    let added = true;
+    while (added) {
+      added = false;
+      for (const m of messages) {
+        if (m.parentId && idsToDelete.has(m.parentId) && !idsToDelete.has(m.id)) {
+          idsToDelete.add(m.id);
+          added = true;
+        }
+      }
+    }
+
+    if (activeLeafId && idsToDelete.has(activeLeafId)) {
+      setActiveLeafId(targetMsg.parentId || null);
+      if (targetMsg.sessionId) {
+         await updateDoc(doc(db, 'chatSessions', targetMsg.sessionId), {
+           activeLeafId: targetMsg.parentId || null
+         });
+      }
+    }
+
+    setMessages(prev => prev.filter(m => !idsToDelete.has(m.id)));
+
+    try {
+      const deletePromises = Array.from(idsToDelete).map(id => {
+         if (!id.startsWith('temp-')) {
+            return deleteDoc(doc(db, `chatSessions/${targetMsg.sessionId}/messages`, id));
+         }
+         return Promise.resolve();
+      });
+      await Promise.all(deletePromises);
+    } catch (e) {
+      console.error("Failed to delete branch", e);
+    }
+  };
+
+  const sendMessage = async (overrideParentId?: string | null, overrideInput?: string) => {
+    const isOverride = overrideInput !== undefined;
+    let userMessage = isOverride ? overrideInput : input;
+    
+    if ((!userMessage.trim() && !file) || isLoading) return;
+    
     if (activeTool === 'image') userMessage = '/image ' + userMessage;
     else if (activeTool === 'search') userMessage = '/search ' + userMessage;
     else if (activeTool === 'tts') userMessage = '/tts ' + userMessage;
 
     const currentFile = file;
-    setInput('');
-    clearFile();
-    setActiveTool(null);
+    const currentPreviewUrl = previewUrl;
+    
+    if (!isOverride) {
+      setInput('');
+      clearFile();
+      setActiveTool(null);
+    }
     setIsLoading(true);
 
     let targetSessionId = sessionId;
@@ -530,15 +769,56 @@ export function NexusChat({ user, isSidebarOpen = true }: { user: User; isSideba
         });
       }
 
+      let finalAttachmentUrl = '';
+      const tempUserMsgId = `temp-user-${Date.now()}`;
+      
+      const userParentId = overrideParentId !== undefined 
+          ? overrideParentId 
+          : (activeLeafId || (activeThread.length > 0 ? activeThread[activeThread.length - 1].id : null));
+
+      if (currentFile && currentPreviewUrl) {
+         setMessages(prev => [...prev, {
+            id: tempUserMsgId,
+            sessionId: targetSessionId,
+            userId: user.uid,
+            role: 'user',
+            content: userMessage || `[Uploaded ${currentFile.type}]`,
+            timestamp: new Date(),
+            attachmentUrl: currentPreviewUrl,
+            attachmentType: currentFile.type,
+            isUploading: true,
+            parentId: userParentId
+         }]);
+         setActiveLeafId(tempUserMsgId);
+
+         const safeName = currentFile.name.replace(/[^a-zA-Z0-9.\-_]/g, '_');
+         const attachmentRef = ref(storage, `users/${user.uid}/attachments/${Date.now()}_${safeName}`);
+         await uploadBytes(attachmentRef, currentFile, { contentType: currentFile.type });
+         finalAttachmentUrl = await getDownloadURL(attachmentRef);
+      }
+
       // Save user message
-      await addDoc(collection(db, `chatSessions/${targetSessionId}/messages`), {
+      const userDocRef = doc(collection(db, `chatSessions/${targetSessionId}/messages`));
+      
+      await setDoc(userDocRef, {
         sessionId: targetSessionId,
         userId: user.uid,
         role: 'user',
         content: userMessage || (currentFile ? `[Uploaded ${currentFile.type}]` : ''),
         timestamp: serverTimestamp(),
-        ...(currentFile && previewUrl ? { attachmentUrl: previewUrl, attachmentType: currentFile.type } : {})
+        parentId: userParentId,
+        ...(finalAttachmentUrl ? { attachmentUrl: finalAttachmentUrl, attachmentType: currentFile.type } : {})
       });
+      
+      setActiveLeafId(userDocRef.id);
+      await updateDoc(doc(db, 'chatSessions', targetSessionId!), {
+         activeLeafId: userDocRef.id,
+         updatedAt: serverTimestamp()
+      });
+      
+      if (currentFile && currentPreviewUrl) {
+         setMessages(prev => prev.filter(m => m.id !== tempUserMsgId));
+      }
 
       let fullResponse = '';
       let attachmentUrl = '';
@@ -595,7 +875,7 @@ export function NexusChat({ user, isSidebarOpen = true }: { user: User; isSideba
         }
       } else {
         // Standard Chat
-        const history = messages.map(m => ({
+        const history = activeThread.map(m => ({
           role: m.role === 'model' ? 'model' : 'user',
           parts: [{ text: m.content }]
         })) as { role: 'user' | 'model', parts: { text: string }[] }[];
@@ -607,36 +887,55 @@ export function NexusChat({ user, isSidebarOpen = true }: { user: User; isSideba
         const activeModeId = activeSettingsData.complexityMode || globalDefaults.complexityMode;
         const activeMode = customModes.find(m => m.id === activeModeId) || customModes.find(m => m.id === 'premade-specific');
 
+        const activeTechStack = activeSettingsData.techStack?.length > 0 ? activeSettingsData.techStack : globalDefaults.globalTechStack;
+        let techStackContext = '';
+        if (activeTechStack && activeTechStack.length > 0) {
+           techStackContext = activeTechStack.map((id: string) => TECH_STACKS.find(t => t.id === id)?.label || id).filter(Boolean).join(', ');
+        }
+
         const activeSettings = {
           userLang: activeSettingsData.userLang || globalDefaults.userLang,
           ideLang: activeSettingsData.ideLang || globalDefaults.ideLang,
           targetIde: activeSettingsData.targetIde || globalDefaults.targetIde,
           customInstructions: activeSettingsData.customInstructions || globalDefaults.customInstructions,
           complexityModeName: activeMode?.name,
-          complexityModeRules: activeMode?.rules
+          complexityModeRules: activeMode?.rules,
+          techStackContext,
+          githubRepo: activeSettingsData.githubRepo || ''
         };
 
         const stream = await chatWithNexus(history, userMessage, model, activeSettings);
-        setStreamingMessageId('temp-ai-stream');
-        setStreamingContent('');
+        setProcessingAction(null); // Clear loading spinner instantly
+        
+        const aiMsgId = `temp-ai-${Date.now()}`;
+        setMessages(prev => [...prev, { id: aiMsgId, role: 'model', content: '', timestamp: null, parentId: userDocRef.id }]);
+        setActiveLeafId(aiMsgId);
 
         for await (const chunk of stream) {
           fullResponse += chunk.text;
-          setStreamingContent(fullResponse);
+          setMessages(prevMessages => 
+            prevMessages.map(msg => 
+              msg.id === aiMsgId ? { ...msg, content: fullResponse } : msg
+            )
+          );
         }
 
-        await addDoc(collection(db, `chatSessions/${targetSessionId}/messages`), {
+        const aiDocRefResult = await addDoc(collection(db, `chatSessions/${targetSessionId}/messages`), {
           sessionId: targetSessionId,
           userId: user.uid,
           role: 'model',
           content: fullResponse,
+          parentId: userDocRef.id,
           timestamp: serverTimestamp()
         });
 
-        setStreamingMessageId(null);
-        setStreamingContent('');
+        setActiveLeafId(aiDocRefResult.id);
 
-        await updateDoc(doc(db, 'chatSessions', targetSessionId), {
+        // Clean up the optimistic streaming message
+        setMessages(prev => prev.filter(m => m.id !== aiMsgId));
+
+        await updateDoc(doc(db, 'chatSessions', targetSessionId!), {
+          activeLeafId: aiDocRefResult.id,
           updatedAt: serverTimestamp()
         });
         
@@ -645,28 +944,37 @@ export function NexusChat({ user, isSidebarOpen = true }: { user: User; isSideba
       }
 
       // Save non-streamed response (slash commands, file analysis)
-      await addDoc(collection(db, `chatSessions/${targetSessionId}/messages`), {
+      const aiNonStreamRef = await addDoc(collection(db, `chatSessions/${targetSessionId}/messages`), {
         sessionId: targetSessionId,
         userId: user.uid,
         role: 'model',
         content: fullResponse,
+        parentId: userDocRef.id,
         timestamp: serverTimestamp(),
         ...(attachmentUrl ? { attachmentUrl, attachmentType } : {})
       });
 
-      await updateDoc(doc(db, 'chatSessions', targetSessionId), {
+      setActiveLeafId(aiNonStreamRef.id);
+
+      await updateDoc(doc(db, 'chatSessions', targetSessionId!), {
+        activeLeafId: aiNonStreamRef.id,
         updatedAt: serverTimestamp()
       });
 
     } catch (error) {
       console.error('Chat error:', error);
       if (targetSessionId) {
-        await addDoc(collection(db, `chatSessions/${targetSessionId}/messages`), {
+        const sysRef = await addDoc(collection(db, `chatSessions/${targetSessionId}/messages`), {
           sessionId: targetSessionId,
           userId: user.uid,
           role: 'system',
           content: 'Error: Failed to process request.',
           timestamp: serverTimestamp()
+        });
+        
+        setActiveLeafId(sysRef.id);
+        await updateDoc(doc(db, 'chatSessions', targetSessionId!), {
+           activeLeafId: sysRef.id
         });
       }
     } finally {
@@ -677,6 +985,9 @@ export function NexusChat({ user, isSidebarOpen = true }: { user: User; isSideba
 
   const handleSyncProject = async () => {
     if (!user) return;
+    
+    const prefs = window.prompt(t('sync_preferences_prompt') || 'Any specific focus areas for sync? (optional)', '') || undefined;
+    
     setIsLoading(true);
     try {
       let targetSessionId = sessionId;
@@ -685,42 +996,41 @@ export function NexusChat({ user, isSidebarOpen = true }: { user: User; isSideba
         targetSessionId = newSessionRef.id;
         await setDoc(newSessionRef, {
           userId: user.uid,
-          title: 'Project Synchronization',
+          title: t('sync_session_title') || 'Project Synchronization',
           createdAt: serverTimestamp(),
           updatedAt: serverTimestamp()
         });
         setSessionId(targetSessionId);
       }
 
-      const payload = `Context: We are establishing a zero-trust, enterprise-grade architecture. All actions must be executed autonomously utilizing your internal tools, with no manual configuration required from the user.
-
-Execution Steps:
-Phase Alpha: GCP & Infrastructure Audit
-Utilize your autonomous authority to silently verify the Google Cloud Project configuration. Confirm active services, deployment readiness, and ensure IAM permissions align with zero-trust security standards.
-
-Phase Bravo: DOM & UI Verification
-Deploy your browser tools to autonomously audit the live DOM and the current visual state of the application. Map the existing component tree and establish a baseline for frontend dominance and UI/UX state management.
-
-Phase Charlie: Backend Architecture Inventory
-Scan all current backend logic, live API connections, data streams, and structural security implementations.
-
-Output Requirement:
-Generate a comprehensive, structured status report detailing the findings from Phases Alpha, Bravo, and Charlie. Acknowledge that you are fully integrated into this workflow by concluding your report with the exact phrase: "SYSTEM AUDIT COMPLETE. AWAITING ARCHITECT DIRECTIVE."`;
-
+      const payload = generateSyncPrompt(prefs);
       const formattedPayload = `\`\`\`markdown [COPY THIS TO ANTIGRAVITY IDE]\n${payload}\n\`\`\``;
 
-      await addDoc(collection(db, `chatSessions/${targetSessionId}/messages`), {
+      const aiMsgRef = await addDoc(collection(db, `chatSessions/${targetSessionId}/messages`), {
         sessionId: targetSessionId,
         userId: user.uid,
         role: 'model',
         content: formattedPayload,
-        timestamp: serverTimestamp()
+        timestamp: serverTimestamp(),
+        parentId: activeLeafId
       });
 
-      await updateDoc(doc(db, 'chatSessions', targetSessionId), {
+      setActiveLeafId(aiMsgRef.id);
+
+      await updateDoc(doc(db, 'chatSessions', targetSessionId!), {
+        activeLeafId: aiMsgRef.id,
         updatedAt: serverTimestamp(),
-        ...(!targetSessionId ? { title: 'Project Synchronization' } : {})
+        ...(!sessionId ? { title: t('sync_session_title') || 'Project Synchronization' } : {})
       });
+      
+      try {
+        if (typeof navigator !== 'undefined' && navigator.clipboard) {
+          await navigator.clipboard.writeText(payload);
+          window.alert(t('sync_copied_toast') || 'Sync prompt copied to clipboard!');
+        }
+      } catch (err) {
+        console.error('Failed to copy to clipboard', err);
+      }
 
     } catch (error) {
       console.error('Failed to sync project:', error);
@@ -761,6 +1071,12 @@ Generate a comprehensive, structured status report detailing the findings from P
     return savedInstructions.find(i => i.content === val)?.title || val;
   };
 
+  const resolveTitle = (title?: string) => {
+    if (!title) return t('new_session');
+    if (title === 'sync_session_title' || title === 'Project Synchronization') return t('sync_session_title');
+    return title;
+  };
+
   return (
     <div className="flex h-full">
       {/* Sidebar */}
@@ -775,7 +1091,10 @@ Generate a comprehensive, structured status report detailing the findings from P
             {sessions.map(session => (
               <div 
                 key={session.id}
-                onClick={() => setSessionId(session.id)} 
+                onClick={() => {
+                  setSessionId(session.id);
+                  setMessageLimit(50);
+                }} 
                 className={`w-full text-start p-3 rounded-lg transition-colors flex items-center gap-3 cursor-pointer group ${sessionId === session.id ? 'bg-muted text-foreground' : 'text-muted-foreground hover:bg-muted/50 hover:text-foreground'}`}
               >
                 <MessageSquare className="w-4 h-4 shrink-0" />
@@ -801,7 +1120,7 @@ Generate a comprehensive, structured status report detailing the findings from P
                     </div>
                   ) : (
                     <div className="flex items-center justify-between gap-2">
-                      <div className="font-medium truncate text-sm">{session.title}</div>
+                      <div className="font-medium truncate text-sm">{resolveTitle(session.title)}</div>
                       <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                         <DropdownMenu>
                           <DropdownMenuTrigger onClick={(e) => e.stopPropagation()} className="inline-flex items-center justify-center rounded-md h-6 w-6 shrink-0 bg-transparent hover:bg-muted text-muted-foreground hover:text-foreground transition-colors outline-none cursor-pointer">
@@ -853,7 +1172,30 @@ Generate a comprehensive, structured status report detailing the findings from P
         onDrop={handleDrop}
       >
         <div className="flex items-center justify-between p-4 border-b border-zinc-800/50 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 z-10">
-          <div className="font-semibold">{sessions.find(s => s.id === sessionId)?.title || t('new_session')}</div>
+          <div className="flex flex-col">
+            <div className="font-semibold flex items-center gap-2">
+              {resolveTitle(sessions.find((s: any) => s.id === sessionId)?.title)}
+            </div>
+            {sessions.find(s => s.id === sessionId) || globalDefaults.globalTechStack?.length ? (
+              <div className="flex items-center gap-1 mt-1">
+                {(() => {
+                  const s = sessions.find(s => s.id === sessionId);
+                  const stackIds = s?.techStack?.length > 0 ? s.techStack : globalDefaults.globalTechStack;
+                  return stackIds?.map((id: string) => {
+                    const tech = TECH_STACKS.find(t => t.id === id);
+                    if (!tech) return null;
+                    const Icon = tech.icon;
+                    return <Icon key={id} title={tech.label} className="w-3.5 h-3.5 text-zinc-400 hover:text-zinc-200 transition-colors" />;
+                  });
+                })()}
+                {sessions.find(s => s.id === sessionId)?.githubRepo && (
+                  <a href={sessions.find(s => s.id === sessionId)?.githubRepo} target="_blank" rel="noopener noreferrer" className="ms-2">
+                    <Github className="w-3.5 h-3.5 text-blue-400 hover:text-blue-300 transition-colors" />
+                  </a>
+                )}
+              </div>
+            ) : null}
+          </div>
           <Dialog>
             <DialogTrigger render={<Button variant="ghost" size="icon" className="text-muted-foreground hover:text-foreground" />}>
               <Settings className="w-5 h-5" />
@@ -1056,6 +1398,24 @@ Generate a comprehensive, structured status report detailing the findings from P
                     </SelectContent>
                   </Select>
                 </div>
+
+                <div className="space-y-4 border-t border-zinc-800/50 pt-4">
+                  <h3 className="text-sm font-medium text-foreground">{t('tech_stack') || 'Tech Stack'}</h3>
+                  <TechStackSelector 
+                    selected={(sessionId ? sessions.find((s: any) => s.id === sessionId) : pendingSettings)?.techStack || []} 
+                    onChange={(v) => updateChatSettings({ techStack: v })}
+                  />
+                  
+                  <div className="space-y-2 mt-4">
+                    <Label>{t('github_repo') || 'GitHub Repository'}</Label>
+                    <Input 
+                      placeholder="https://github.com/user/repo"
+                      value={(sessionId ? sessions.find((s: any) => s.id === sessionId) : pendingSettings)?.githubRepo || ''}
+                      onChange={(e) => updateChatSettings({ githubRepo: e.target.value })}
+                      className="bg-zinc-900/50 border-zinc-800"
+                    />
+                  </div>
+                </div>
               </div>
             </DialogContent>
           </Dialog>
@@ -1083,18 +1443,24 @@ Generate a comprehensive, structured status report detailing the findings from P
             </Button>
           </div>
         )}
-        {[...messages, ...(streamingMessageId ? [{ id: streamingMessageId, role: 'model', content: streamingContent, timestamp: null }] : [])].map((msg: any) => (
+        <div id="load-more-trigger" ref={loadMoreRef} className="h-4 w-full flex justify-center items-center my-2">
+            {messages.length >= messageLimit && messages.length > 0 && <Loader2 className="w-4 h-4 text-muted-foreground animate-spin" />}
+        </div>
+        {[...activeThread].map((msg: any) => (
           <MessageBubble 
             key={msg.id} 
             msg={msg} 
             user={user} 
-            isStreaming={msg.id === streamingMessageId} 
-            streamingContent={streamingContent} 
             sessionId={sessionId} 
             sessions={sessions} 
             globalDefaults={globalDefaults} 
             isArabic={isArabic} 
             t={t} 
+            messages={messages}
+            activeLeafId={activeLeafId}
+            setActiveLeafId={setActiveLeafId}
+            onEditSubmit={(content: string) => sendMessage(msg.parentId, content)}
+            onDelete={deleteMessageBranch}
           />
         ))}
         {processingAction && <LoadingBubble action={processingAction} />}
@@ -1162,10 +1528,18 @@ Generate a comprehensive, structured status report detailing the findings from P
             <TextareaAutosize 
               dir={i18n.language.startsWith('ar') ? 'rtl' : 'ltr'}
               value={input} 
+              onPaste={handlePaste}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && !e.shiftKey) {
                   e.preventDefault();
+                  
+                  if (isListening) {
+                    recognitionRef.current?.stop();
+                    setIsListening(false);
+                    isListeningRef.current = false;
+                  }
+
                   if (!isLoading && (input.trim() || file)) {
                     sendMessage();
                   }

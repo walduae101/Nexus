@@ -7,6 +7,7 @@ const en = {
     // General
     "default": "Default",
     "sync_existing": "Sync Existing Project",
+    "sync_session_title": "Project Sync Session",
     "slogan": "UNIFIED WORKFLOW",
     "loading": "Loading...",
     "sign_in_google": "Sign in with Google",
@@ -62,6 +63,11 @@ const en = {
 
     // Global Settings
     "global_settings_hub": "Global Settings Hub",
+    "tech_stack": "Tech Stack",
+    "github_repo": "GitHub Repository",
+    "select_env": "Select Environment",
+    "add_custom_tech": "Add Custom",
+    "custom_tech_placeholder": "e.g. Svelte, Prisma, Docker...",
     "tab_defaults": "Defaults",
     "tab_langs": "Langs",
     "tab_ides": "IDEs",
@@ -76,6 +82,15 @@ const en = {
     "default_target_ide": "Default Target IDE",
     "select_default_ide": "Select Default IDE",
     "default_custom_instructions": "Default Custom Instructions",
+    "typography_settings": "Typography",
+    "font_family": "Font Family",
+    "font_size": "Font Size",
+    "size_small": "Small",
+    "size_medium": "Medium",
+    "size_large": "Large",
+    "font_system": "System Default",
+    "font_cairo": "Cairo (Arabic)",
+    "font_tajawal": "Tajawal (Arabic)",
     
     // Select Group Labels
     "official_languages": "Official Languages",
@@ -139,6 +154,7 @@ const ar = {
     // General
     "default": "الافتراضي",
     "sync_existing": "مزامنة المشروع الحالي",
+    "sync_session_title": "جلسة مزامنة المشروع",
     "slogan": "سير عمل موحد",
     "loading": "جاري التحميل...",
     "sign_in_google": "تسجيل الدخول باستخدام جوجل",
@@ -194,6 +210,11 @@ const ar = {
 
     // Global Settings
     "global_settings_hub": "مركز الإعدادات العامة",
+    "tech_stack": "حزمة التقنيات",
+    "github_repo": "مستودع جيت هاب",
+    "select_env": "اختيار بيئة العمل",
+    "add_custom_tech": "إضافة مخصصة",
+    "custom_tech_placeholder": "مثال: Svelte, Prisma, Docker...",
     "tab_defaults": "الافتراضيات",
     "tab_langs": "اللغات",
     "tab_ides": "بيئات العمل",
@@ -208,6 +229,15 @@ const ar = {
     "default_target_ide": "بيئة التطوير المستهدفة الافتراضية",
     "select_default_ide": "اختر البيئة الافتراضية",
     "default_custom_instructions": "التعليمات المخصصة الافتراضية",
+    "typography_settings": "الخطوط والنصوص",
+    "font_family": "نوع الخط",
+    "font_size": "حجم الخط",
+    "size_small": "صغير",
+    "size_medium": "متوسط",
+    "size_large": "كبير",
+    "font_system": "الخط الافتراضي للنظام",
+    "font_cairo": "Cairo (عربي)",
+    "font_tajawal": "Tajawal (عربي)",
     
     // Select Group Labels
     "official_languages": "اللغات الرسمية",

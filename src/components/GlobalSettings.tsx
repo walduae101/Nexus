@@ -9,6 +9,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
 import { Label } from './ui/label';
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectSeparator, SelectTrigger, SelectValue } from './ui/select';
 import { useTranslation } from 'react-i18next';
+import { TechStackSelector } from './TechStackSelector';
 
 export function GlobalSettings() {
   const { t, i18n } = useTranslation();
@@ -53,7 +54,55 @@ export function GlobalSettings() {
           </TabsList>
 
           <TabsContent value="defaults" className="space-y-6 mt-4">
-            <div className="space-y-2">
+            <div className="space-y-4 border-b border-zinc-800 pb-6">
+              <h3 className="text-lg font-medium text-foreground">{t('typography_settings')}</h3>
+              
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label className="text-sm font-medium text-zinc-200">{t('font_family')}</Label>
+                  <Select 
+                    value={globalDefaults.fontFamily} 
+                    onValueChange={v => updateGlobalDefaults({ fontFamily: v })}
+                  >
+                    <SelectTrigger className="bg-zinc-900/50 border-zinc-800 focus:ring-1 focus:ring-zinc-700 rounded-lg">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent className="z-[9999]" position="popper">
+                      <SelectItem value="system">{t('font_system')}</SelectItem>
+                      <SelectItem value="cairo">{t('font_cairo')}</SelectItem>
+                      <SelectItem value="tajawal">{t('font_tajawal')}</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="space-y-2">
+                  <Label className="text-sm font-medium text-zinc-200">{t('font_size')}</Label>
+                  <Select 
+                    value={globalDefaults.fontSize} 
+                    onValueChange={v => updateGlobalDefaults({ fontSize: v })}
+                  >
+                    <SelectTrigger className="bg-zinc-900/50 border-zinc-800 focus:ring-1 focus:ring-zinc-700 rounded-lg">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent className="z-[9999]" position="popper">
+                      <SelectItem value="small">{t('size_small')}</SelectItem>
+                      <SelectItem value="medium">{t('size_medium')}</SelectItem>
+                      <SelectItem value="large">{t('size_large')}</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+            </div>
+
+            <div className="space-y-4 border-b border-zinc-800 pb-6 mt-6">
+               <h3 className="text-lg font-medium text-foreground">{t('tech_stack') || 'Tech Stack'}</h3>
+               <TechStackSelector 
+                 selected={globalDefaults.globalTechStack || []} 
+                 onChange={v => updateGlobalDefaults({ globalTechStack: v })} 
+               />
+            </div>
+
+            <div className="space-y-2 mt-6">
               <Label className="text-sm font-medium text-zinc-200">{t('default_user_language')}</Label>
               <p className="text-xs text-zinc-500">{t('user_output_desc')}</p>
               <Select 

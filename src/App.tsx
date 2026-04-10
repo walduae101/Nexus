@@ -98,10 +98,13 @@ function AppContent() {
 function NexusWorkspace({ user, isSidebarOpen, setIsSidebarOpen, signOut, auth, t, i18n }: any) {
   const { globalDefaults } = useSettings();
 
+  const sizeClass = globalDefaults?.fontSize === 'small' ? 'text-sm' : globalDefaults?.fontSize === 'large' ? 'text-lg' : 'text-base';
+  const fontStyle = globalDefaults?.fontFamily === 'cairo' ? { fontFamily: "'Cairo', sans-serif" } : globalDefaults?.fontFamily === 'tajawal' ? { fontFamily: "'Tajawal', sans-serif" } : {};
+
   return (
-    <>
+    <div className={`w-full h-screen ${sizeClass}`} style={fontStyle}>
       {globalDefaults && globalDefaults.hasCompletedOnboarding === false && <OnboardingWizard />}
-      <div className="flex h-screen bg-background text-foreground overflow-hidden">
+      <div className="flex h-full bg-background text-foreground overflow-hidden">
         <div className="flex flex-col w-full max-w-7xl mx-auto">
           <header className="flex items-center justify-between p-4 border-b border-zinc-800/50 bg-card/50">
             <div className="flex items-center gap-2">
@@ -145,7 +148,7 @@ function NexusWorkspace({ user, isSidebarOpen, setIsSidebarOpen, signOut, auth, 
           </main>
         </div>
       </div>
-    </>
+    </div>
   );
 }
 
