@@ -1,12 +1,12 @@
 import { useState } from 'react';
-import { useSettings } from '../contexts/SettingsContext';
+import { useSettings } from '@/contexts/SettingsContext';
 import { useTranslation } from 'react-i18next';
-import { Button } from './ui/button';
-import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectSeparator, SelectTrigger, SelectValue } from './ui/select';
-import { Textarea } from './ui/textarea';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from './ui/card';
+import { Button } from '@/components/ui/button';
+import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectSeparator, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Textarea } from '@/components/ui/textarea';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { motion, AnimatePresence } from 'motion/react';
-import { Label } from './ui/label';
+import { Label } from '@/components/ui/label';
 
 export function OnboardingWizard() {
   const [step, setStep] = useState(1);

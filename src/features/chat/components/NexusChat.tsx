@@ -1,27 +1,27 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { User } from 'firebase/auth';
 import { collection, query, orderBy, onSnapshot, addDoc, serverTimestamp, doc, setDoc, where, updateDoc, deleteDoc, getDocs, limit } from 'firebase/firestore';
-import { db, handleFirestoreError, OperationType, storage } from '../lib/firebase';
+import { db, handleFirestoreError, OperationType, storage } from '@/lib/firebase';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
-import { chatWithNexus, generateImage, searchGrounding, textToSpeech, analyzeMedia, transcribeAudio, fastTask } from '../lib/gemini';
-import { Button } from './ui/button';
-import { Input } from './ui/input';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue, SelectGroup, SelectLabel, SelectSeparator } from './ui/select';
-import { ScrollArea } from './ui/scroll-area';
-import { Card, CardContent } from './ui/card';
+import { chatWithNexus, generateImage, searchGrounding, textToSpeech, analyzeMedia, transcribeAudio, fastTask } from '@/lib/gemini';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue, SelectGroup, SelectLabel, SelectSeparator } from '@/components/ui/select';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import { Card, CardContent } from '@/components/ui/card';
 import { Send, Bot, User as UserIcon, Loader2, Paperclip, X, Image as ImageIcon, Mic, Search, Video, Plus, MessageSquare, Pencil, Check, Trash2, Download, UploadCloud, Play, Settings, Info, FolderSync, Copy, Wand2, Globe, Volume2, MoreVertical, Pin, ChevronUp, ChevronDown, ChevronLeft, ChevronRight, Lightbulb, Sparkles, Terminal, Square } from 'lucide-react';
 import Markdown from 'react-markdown';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogClose, DialogTrigger } from './ui/dialog';
-import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from './ui/sheet';
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from './ui/dropdown-menu';
-import { Avatar, AvatarImage, AvatarFallback } from './ui/avatar';
-import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip';
-import { Label } from './ui/label';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogClose, DialogTrigger } from '@/components/ui/dialog';
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from '@/components/ui/sheet';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
+import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { Label } from '@/components/ui/label';
 import { motion } from 'motion/react';
-import { useSettings } from '../contexts/SettingsContext';
+import { useSettings } from '@/contexts/SettingsContext';
 import { useTranslation } from 'react-i18next';
 import TextareaAutosize from 'react-textarea-autosize';
-import { TechStackSelector, TECH_STACKS } from './TechStackSelector';
+import { TechStackSelector, TECH_STACKS } from '@/features/core/components/TechStackSelector';
 import { Github } from 'lucide-react';
 
 export interface Spark {
@@ -34,380 +34,8 @@ export interface Spark {
 
 const isArabic = (text: string) => /[\u0600-\u06FF]/.test(text || '');
 
-function MessageCopyButton({ text }: { text: string }) {
-  const [isCopied, setIsCopied] = useState(false);
-
-  const handleCopy = async (e: React.MouseEvent) => {
-    e.stopPropagation();
-    try {
-      await navigator.clipboard.writeText(text);
-      setIsCopied(true);
-      setTimeout(() => setIsCopied(false), 2000);
-    } catch (err) {
-      console.error('Failed to copy!', err);
-    }
-  };
-
-  return (
-    <button 
-      onClick={handleCopy}
-      className="p-1.5 text-zinc-400 hover:text-zinc-200 bg-zinc-900/50 hover:bg-zinc-800 rounded-md transition-all duration-200"
-      title="Copy message"
-    >
-      {isCopied ? <Check className="h-3.5 w-3.5 text-emerald-400" /> : <Copy className="h-3.5 w-3.5" />}
-    </button>
-  );
-}
-
-function ActionableCodeBlock({ payload, targetIde, userId }: { payload: string, targetIde: string, userId: string }) {
-  const [isCopied, setIsCopied] = useState(false);
-  const { globalDefaults: settings } = useSettings();
-
-  const sizeClass = settings.fontSize === 'small' ? 'text-sm' : settings.fontSize === 'large' ? 'text-lg' : 'text-base';
-  const fontStyle = settings.fontFamily === 'cairo' ? { fontFamily: "'Cairo', sans-serif" } : settings.fontFamily === 'tajawal' ? { fontFamily: "'Tajawal', sans-serif" } : {};
-
-  const handleCopy = async () => {
-    try {
-      await navigator.clipboard.writeText(payload);
-      setIsCopied(true);
-      setTimeout(() => setIsCopied(false), 2000);
-    } catch (error) {
-      console.error('Failed to copy payload:', error);
-    }
-  };
-
-  return (
-    <Card className="my-4 border-border bg-zinc-950 overflow-hidden shadow-lg h-auto">
-      <div className="flex items-center justify-between px-4 py-2 bg-zinc-900 border-b border-zinc-800">
-        <div className="flex items-center gap-2">
-          <div className="w-3 h-3 rounded-full bg-red-500/20 border border-red-500/50" />
-          <div className="w-3 h-3 rounded-full bg-yellow-500/20 border border-yellow-500/50" />
-          <div className="w-3 h-3 rounded-full bg-green-500/20 border border-green-500/50" />
-          <span className="ms-2 text-xs font-mono text-zinc-400">IDE Payload</span>
-        </div>
-        <Button 
-          size="sm" 
-          variant="secondary"
-          className="h-7 text-xs gap-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 transition-colors"
-          onClick={handleCopy}
-          disabled={isCopied}
-        >
-          {isCopied ? <><Check className="w-3 h-3" /> Copied!</> : <><Copy className="w-3 h-3" /> Copy Payload</>}
-        </Button>
-      </div>
-      <CardContent className="p-0 flex flex-col h-auto">
-        <pre 
-          className={`p-4 pb-6 text-zinc-300 whitespace-pre-wrap break-words ${sizeClass}`}
-          style={fontStyle}
-        >
-          {payload}
-        </pre>
-      </CardContent>
-    </Card>
-  );
-}
-
-function RelativeTime({ date, lang, fallback }: { date: Date | null, lang: string, fallback: string }) {
-  const [tick, setTick] = useState(0);
-
-  useEffect(() => {
-    if (!date) return;
-    const interval = setInterval(() => setTick(t => t + 1), 60000);
-    return () => clearInterval(interval);
-  }, [date]);
-
-  if (!date) return <>{fallback}</>;
-
-  const getRelativeTime = (d: Date, l: string) => {
-    const rtf = new Intl.RelativeTimeFormat(l, { numeric: 'auto', style: 'short' });
-    const diffInSeconds = (d.getTime() - Date.now()) / 1000;
-    
-    if (Math.abs(diffInSeconds) < 60) return rtf.format(Math.round(diffInSeconds), 'second');
-    const diffInMinutes = diffInSeconds / 60;
-    if (Math.abs(diffInMinutes) < 60) return rtf.format(Math.round(diffInMinutes), 'minute');
-    const diffInHours = diffInMinutes / 60;
-    if (Math.abs(diffInHours) < 24) return rtf.format(Math.round(diffInHours), 'hour');
-    const diffInDays = diffInHours / 24;
-    if (Math.abs(diffInDays) < 30) return rtf.format(Math.round(diffInDays), 'day');
-    const diffInMonths = diffInDays / 30;
-    if (Math.abs(diffInMonths) < 12) return rtf.format(Math.round(diffInMonths), 'month');
-    const diffInYears = diffInDays / 365;
-    return rtf.format(Math.round(diffInYears), 'year');
-  };
-
-  return <>{getRelativeTime(date, lang)}</>;
-}
-
-function LoadingBubble({ action }: { action: 'text' | 'image' | 'tts' | 'search' }) {
-  const { t } = useTranslation();
-  const text = action === 'text' ? t('loading_text') : action === 'tts' ? t('loading_tts') : action === 'image' ? t('loading_image') : t('loading_search');
-  return (
-    <div className="flex gap-4 p-4 md:p-6 w-full text-foreground border-b border-border">
-      <Avatar className="w-8 h-8 rounded-lg shrink-0 outline outline-1 outline-border shadow-sm">
-        <AvatarImage src="/logo.png" className="p-1.5" />
-        <AvatarFallback className="bg-primary/20 text-primary">N</AvatarFallback>
-      </Avatar>
-      <div className="flex-1 flex flex-col justify-center min-w-0">
-        <div className="flex items-center gap-2 h-5 mt-1">
-          <motion.div className="w-2 h-2 bg-primary rounded-full ms-1" animate={{ y: [0, -5, 0] }} transition={{ duration: 0.6, repeat: Infinity, delay: 0 }} />
-          <motion.div className="w-2 h-2 bg-primary rounded-full" animate={{ y: [0, -5, 0] }} transition={{ duration: 0.6, repeat: Infinity, delay: 0.2 }} />
-          <motion.div className="w-2 h-2 bg-primary rounded-full" animate={{ y: [0, -5, 0] }} transition={{ duration: 0.6, repeat: Infinity, delay: 0.4 }} />
-          <span className="ms-3 text-xs font-medium bg-gradient-to-r from-teal-400 to-primary bg-clip-text text-transparent animate-pulse">{text}</span>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function MessageBubble({ msg, user, sessionId, sessions, globalDefaults, isArabic, t, messages, activeLeafId, setActiveLeafId, onEditSubmit, onDelete }: any) {
-  const [isEditing, setIsEditing] = useState(false);
-  const [editText, setEditText] = useState(msg.content);
-
-  const textRef = useRef<HTMLDivElement>(null);
-  const [isExpanded, setIsExpanded] = useState(false);
-  const [isOverflowing, setIsOverflowing] = useState(false);
-
-  useEffect(() => {
-    if (msg.role !== 'user' || isExpanded) return;
-
-    const checkOverflow = () => {
-      if (textRef.current) {
-        // Add a 2px tolerance to avoid sub-pixel rounding false-positives
-        const overflowing = textRef.current.scrollHeight > textRef.current.clientHeight + 2;
-        setIsOverflowing(overflowing);
-      }
-    };
-
-    // Run immediately
-    checkOverflow();
-    // Run again slightly after paint to catch late layout shifts
-    const timer = setTimeout(checkOverflow, 50);
-    return () => clearTimeout(timer);
-  }, [msg.content, isExpanded, msg.role]);
-
-  const content = msg.content;
-  const isMsgArabic = isArabic(content);
-
-  const siblings = messages ? messages.filter((m: any) => m.parentId === msg.parentId && m.role === msg.role) : [];
-  if (siblings.length > 0) {
-    siblings.sort((a: any, b: any) => {
-      const tA = a.timestamp?.toMillis?.() || new Date(a.timestamp).getTime() || 0;
-      const tB = b.timestamp?.toMillis?.() || new Date(b.timestamp).getTime() || 0;
-      return tA - tB;
-    });
-  }
-  const currentIndex = siblings.findIndex((m: any) => m.id === msg.id);
-
-  const navigateBranch = (dir: number) => {
-    const targetSibling = siblings[currentIndex + dir];
-    if (!targetSibling) return;
-    
-    let currentDeepest = targetSibling.id;
-    let keepSearching = true;
-    while(keepSearching) {
-      const children = messages.filter((m: any) => m.parentId === currentDeepest);
-      if (children.length > 0) {
-        children.sort((a: any, b: any) => {
-           const tA = a.timestamp?.toMillis?.() || new Date(a.timestamp).getTime() || 0;
-           const tB = b.timestamp?.toMillis?.() || new Date(b.timestamp).getTime() || 0;
-           return tB - tA; // newest first
-        });
-        currentDeepest = children[0].id;
-      } else {
-        keepSearching = false;
-      }
-    }
-    setActiveLeafId(currentDeepest);
-  };
-
-  return (
-    <motion.div 
-      initial={{ opacity: 0, y: 10 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.3 }}
-      className={`flex gap-4 group ${msg.role === 'user' ? 'flex-row-reverse' : ''}`}
-    >
-      <Avatar className="w-8 h-8 shrink-0">
-        {msg.role === 'user' ? (
-          <>
-            <AvatarImage src={user?.photoURL || ''} />
-            <AvatarFallback className="bg-primary text-primary-foreground text-xs font-medium">{user?.email?.charAt(0).toUpperCase() || 'U'}</AvatarFallback>
-          </>
-        ) : msg.role === 'system' ? (
-          <AvatarFallback className="bg-destructive text-destructive-foreground font-bold text-xs">!</AvatarFallback>
-        ) : (
-          <>
-            <AvatarImage src="/logo.png" alt="Nexus" className="object-cover" />
-            <AvatarFallback className="bg-teal-900 text-white font-bold text-xs">N</AvatarFallback>
-          </>
-        )}
-      </Avatar>
-      <div className={`relative max-w-[80%] rounded-2xl p-4 ${msg.role === 'user' ? 'bg-primary text-primary-foreground' : msg.role === 'system' ? 'bg-destructive/20 text-destructive border border-destructive/50' : 'bg-muted text-foreground'}`}>
-        
-        {siblings.length > 1 && (
-          <div className={`flex items-center gap-2 mb-2 text-xs font-mono font-bold ${msg.role === 'user' ? 'text-primary-foreground/70' : 'text-muted-foreground'}`}>
-            <button onClick={() => navigateBranch(-1)} disabled={currentIndex === 0} className="hover:text-current disabled:opacity-30"> <ChevronLeft className="w-3 h-3" /> </button>
-            <span>{currentIndex + 1} / {siblings.length}</span>
-            <button onClick={() => navigateBranch(1)} disabled={currentIndex === siblings.length - 1} className="hover:text-current disabled:opacity-30"> <ChevronRight className="w-3 h-3" /> </button>
-          </div>
-        )}
-
-        {msg.attachmentUrl && msg.attachmentType?.startsWith('image/') && (!msg.attachments || msg.attachments.length === 0) && (
-          <Card className={`mb-3 overflow-hidden border-border bg-muted/30 ${msg.isUploading ? 'opacity-70 animate-pulse' : ''}`}>
-            <CardContent className="p-2 relative group flex items-center justify-center">
-              <img src={msg.attachmentUrl} alt="User attachment" className="max-w-full rounded-md" />
-              {msg.isUploading && <Loader2 className="w-8 h-8 absolute text-primary animate-spin" />}
-              {!msg.isUploading && (
-                <a 
-                  href={msg.attachmentUrl} 
-                  download="generated-image.png" 
-                  target="_blank" 
-                  rel="noreferrer"
-                  className="absolute top-4 end-4 bg-background/80 hover:bg-background p-2 rounded-full opacity-0 group-hover:opacity-100 transition-opacity z-10"
-                >
-                  <Download className="w-4 h-4 text-foreground" />
-                </a>
-              )}
-            </CardContent>
-          </Card>
-        )}
-
-        {msg.attachments && msg.attachments.length > 0 && (
-          <div className={`grid gap-2 mb-3 w-full ${msg.attachments.length === 1 ? 'grid-cols-1 max-w-sm' : msg.attachments.length <= 4 ? 'grid-cols-2' : 'grid-cols-3'}`}>
-            {msg.attachments.map((url: string, idx: number) => (
-              <div key={idx} className={`relative overflow-hidden rounded-lg border border-zinc-800 ${msg.isUploading ? 'opacity-70 animate-pulse' : ''} group`}>
-                <img 
-                  src={url} 
-                  alt={`Attachment ${idx + 1}`} 
-                  className="w-full h-full object-cover max-h-48 cursor-pointer hover:opacity-90 transition-opacity"
-                  loading="lazy"
-                />
-                {!msg.isUploading && (
-                  <a 
-                    href={url} 
-                    download={`attachment-${idx}.png`} 
-                    target="_blank" 
-                    rel="noreferrer"
-                    className="absolute top-2 right-2 bg-background/80 hover:bg-background p-1.5 rounded-full opacity-0 md:group-hover:opacity-100 transition-opacity z-10 shadow-sm border border-zinc-700"
-                  >
-                    <Download className="w-3 h-3 text-foreground" />
-                  </a>
-                )}
-              </div>
-            ))}
-            {msg.isUploading && <Loader2 className="w-8 h-8 absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-primary animate-spin shadow-lg drop-shadow-xl" />}
-          </div>
-        )}
-        {msg.attachmentUrl && msg.attachmentType?.startsWith('audio/') && (
-          <Card className="mb-3 border-border bg-muted/30">
-            <CardContent className="p-3 flex items-center gap-3">
-              <div className="bg-primary/20 p-2 rounded-full shrink-0">
-                <Mic className="w-4 h-4 text-primary" />
-              </div>
-              <audio src={msg.attachmentUrl} controls className="w-full h-10" />
-            </CardContent>
-          </Card>
-        )}
-        {msg.attachmentUrl && msg.attachmentType?.startsWith('video/') && (
-          <Card className="mb-3 overflow-hidden border-border bg-muted/30">
-            <CardContent className="p-2">
-              <video src={msg.attachmentUrl} controls className="max-w-full rounded-md" />
-            </CardContent>
-          </Card>
-        )}
-        <div className="relative group/content">
-          {isEditing ? (
-             <div className="flex flex-col gap-2 min-w-[250px]">
-                <TextareaAutosize 
-                   value={editText}
-                   onChange={e => setEditText(e.target.value)}
-                   className="w-full bg-zinc-950/50 text-white rounded-md p-2 text-sm max-h-[300px]"
-                />
-                <div className="flex justify-end gap-2 mt-2">
-                   <Button size="sm" variant="ghost" onClick={() => { setIsEditing(false); setEditText(msg.content); }}>Cancel</Button>
-                   <Button size="sm" onClick={() => { setIsEditing(false); onEditSubmit(editText); }}>Save & Submit</Button>
-                </div>
-             </div>
-          ) : (
-            <>
-              <div 
-                ref={msg.role === 'user' ? textRef : null}
-                dir="auto" 
-                className={`markdown-body prose ${msg.role === 'user' ? 'prose-invert prose-headings:text-primary-foreground prose-a:text-primary-foreground' : 'prose-invert'} max-w-none prose-p:leading-relaxed prose-pre:bg-zinc-950 prose-pre:border prose-pre:border-zinc-800 text-start ${msg.role === 'user' && !isExpanded ? 'line-clamp-5 overflow-hidden break-words' : 'break-words'}`}
-              >
-                <Markdown
-                  components={{
-                    code({ node, inline, className, children, ...props }: any) {
-                      const rawText = String(children).replace(/\n$/, '');
-                      const meta = node?.data?.meta || '';
-                      const isAntigravity = 
-                        className?.includes('[COPY THIS TO ANTIGRAVITY IDE]') || 
-                        meta.includes('[COPY THIS TO ANTIGRAVITY IDE]') ||
-                        rawText.includes('[COPY THIS TO ANTIGRAVITY IDE]');
-                      
-                      if (!inline && isAntigravity) {
-                        const payload = rawText.replace(/\[COPY THIS TO ANTIGRAVITY IDE\]/g, '').trim();
-                        const currentSession = sessions.find((s: any) => s.id === sessionId);
-                        const targetIde = currentSession?.targetIde || globalDefaults.targetIde;
-                        return <ActionableCodeBlock payload={payload} targetIde={targetIde} userId={user.uid} />;
-                      }
-                      
-                      return <code className={className} {...props}>{children}</code>;
-                    }
-                  }}
-                >
-                  {content}
-                </Markdown>
-              </div>
-              {msg.role === 'user' && isOverflowing && (
-                <div className="mt-1 flex justify-start w-full" dir="ltr">
-                  <button 
-                    onClick={(e) => { e.stopPropagation(); setIsExpanded(!isExpanded); }}
-                    className="p-1 -ml-1 text-zinc-500 hover:text-zinc-300 transition-colors rounded-md hover:bg-zinc-800/50 flex items-center justify-center"
-                    title={isExpanded ? "Show Less" : "Show More"}
-                  >
-                    {isExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
-                  </button>
-                </div>
-              )}
-
-              {msg.role === 'user' && msg.idePayload && (
-                <div className="mt-3 bg-zinc-950 border border-zinc-800 rounded-lg overflow-hidden text-start dir-ltr">
-                  <div className="flex items-center gap-2 bg-zinc-900 px-3 py-2 border-b border-zinc-800">
-                    <Terminal className="h-4 w-4 text-primary" />
-                    <span className="text-xs font-medium text-zinc-300">{t('attached_ide') || 'IDE Context Attached'}</span>
-                  </div>
-                  <div className="p-3 text-xs font-mono text-zinc-400 whitespace-pre-wrap break-words custom-scrollbar max-h-64 overflow-y-auto" dir="auto">
-                    {msg.idePayload}
-                  </div>
-                </div>
-              )}
-            </>
-          )}
-        </div>
-        {!isEditing && (
-          <div className={`absolute -bottom-4 ${msg.role === 'user' ? 'start-2' : 'end-2'} flex items-center opacity-0 group-hover:opacity-100 transition-opacity z-10 bg-background/90 rounded-md border shadow-sm p-1 gap-1`}>
-            {msg.role === 'user' && (
-               <>
-                 <button onClick={() => setIsEditing(true)} className="p-1.5 text-zinc-400 hover:text-zinc-200 bg-zinc-900/50 hover:bg-zinc-800 rounded-md transition-all duration-200" title="Edit">
-                   <Pencil className="w-3.5 h-3.5" />
-                 </button>
-                 <button 
-                   onClick={(e) => { e.stopPropagation(); onDelete(msg.id); }}
-                   className="p-1.5 text-zinc-400 hover:text-red-400 bg-zinc-800/50 hover:bg-red-500/10 rounded-md transition-all duration-200"
-                   title={t('delete_message') || 'Delete'}
-                 >
-                   <Trash2 className="w-3.5 h-3.5" />
-                 </button>
-               </>
-            )}
-            <MessageCopyButton text={content} />
-          </div>
-        )}
-      </div>
-    </motion.div>
-  );
-}
+import { MessageBubble } from '@/features/chat/components/MessageBubble';
+import { MessageCopyButton, ActionableCodeBlock, RelativeTime, LoadingBubble } from '@/features/chat/components/ChatUIPrimitives';
 
 export const generateSyncPrompt = (userPreferences?: string) => {
   const baseInstruction = `I am coordinating our workflow with Nexus. To ensure we stay synchronized, please generate a comprehensive current-state summary of the workspace. Include the latest updates on our modular architecture, the current status of the game logic and UI/UX polish, and any active system-level configurations.`;
@@ -1153,6 +781,9 @@ export function NexusChat({ user, isSidebarOpen = true }: { user: User; isSideba
         if (targetIdePayload?.trim()) finalAiPrompt += `[SYSTEM: THE FOLLOWING IS THE USER'S IDE CONTEXT/PAYLOAD]:\n${targetIdePayload.trim()}\n\n`;
         if (userMessage.trim()) finalAiPrompt += `[SYSTEM: THE FOLLOWING IS THE USER'S DIRECT QUESTION/NOTE]:\n${userMessage.trim()}`;
         if (!userMessage.trim() && targetIdePayload?.trim()) finalAiPrompt += `[SYSTEM: The user provided code/context without a specific question. Analyze it and provide a brief, insightful summary or suggest improvements.]`;
+        
+
+
 
         abortControllerRef.current = new AbortController();
         
@@ -1211,6 +842,25 @@ export function NexusChat({ user, isSidebarOpen = true }: { user: User; isSideba
               ));
             } else {
               console.error("Stream error:", error);
+              if (targetSessionId && user) {
+                try {
+                  const sysRef = await addDoc(collection(db, `chatSessions/${targetSessionId}/messages`), {
+                    sessionId: targetSessionId,
+                    userId: user.uid,
+                    role: 'system',
+                    content: 'Network Interruption: The AI stream was unexpectedly disconnected. Partial response preserved.',
+                    parentId: userDocRef.id,
+                    timestamp: serverTimestamp()
+                  });
+                  setActiveLeafId(sysRef.id);
+                  await updateDoc(doc(db, 'chatSessions', targetSessionId!), {
+                    activeLeafId: sysRef.id,
+                    updatedAt: serverTimestamp()
+                  });
+                } catch(e) {
+                  console.error('Failed to log system error to DB', e);
+                }
+              }
             }
           } finally {
             abortControllerRef.current = null;

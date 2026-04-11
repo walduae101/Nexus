@@ -2,10 +2,10 @@ import { useEffect, useState } from 'react';
 import { auth, db, handleFirestoreError, OperationType } from './lib/firebase';
 import { signInWithPopup, GoogleAuthProvider, signOut, onAuthStateChanged, User } from 'firebase/auth';
 import { doc, setDoc, getDoc, serverTimestamp } from 'firebase/firestore';
-import { ErrorBoundary } from './components/ErrorBoundary';
-import { Button } from './components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './components/ui/card';
-import { NexusChat } from './components/NexusChat';
+import { ErrorBoundary } from '@/components/ErrorBoundary';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { NexusChat } from '@/features/chat/components/NexusChat';
 import { LogOut, Globe, PanelLeftClose, PanelLeftOpen } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import {
@@ -13,14 +13,14 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
-} from "./components/ui/dropdown-menu";
+} from "@/components/ui/dropdown-menu";
 
-import { SettingsProvider, useSettings } from './contexts/SettingsContext';
-import { OnboardingWizard } from './components/OnboardingWizard';
-import { GlobalSettings } from './components/GlobalSettings';
-import { SparksIntroModal } from './components/SparksIntroModal';
-import { DualModeIntroModal } from './components/DualModeIntroModal';
-import { TooltipProvider } from './components/ui/tooltip';
+import { SettingsProvider, useSettings } from '@/contexts/SettingsContext';
+import { OnboardingWizard } from '@/features/onboarding/components/OnboardingWizard';
+import { GlobalSettings } from '@/features/settings/components/GlobalSettings';
+import { SparksIntroModal } from '@/features/sparks/components/SparksIntroModal';
+import { DualModeIntroModal } from '@/features/chat/components/DualModeIntroModal';
+import { TooltipProvider } from '@/components/ui/tooltip';
 
 function AppContent() {
   const [user, setUser] = useState<User | null>(null);
