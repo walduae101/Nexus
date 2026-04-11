@@ -1033,11 +1033,14 @@ export function NexusChat({ user, isSidebarOpen = true, setIsSidebarOpen }: { us
           }, 30);
         });
 
+        const needsImmediateSync = fullResponse.includes('[SYNC_SCRATCHPAD]');
+        const cleanResponse = fullResponse.replace(/\[SYNC_SCRATCHPAD\]/g, '').trim();
+
         const aiDocRefResult = await addDoc(collection(db, `chatSessions/${targetSessionId}/messages`), {
           sessionId: targetSessionId,
           userId: user.uid,
           role: 'model',
-          content: fullResponse,
+          content: cleanResponse,
           parentId: activeUserMsgId,
           timestamp: serverTimestamp()
         });
@@ -1053,11 +1056,19 @@ export function NexusChat({ user, isSidebarOpen = true, setIsSidebarOpen }: { us
         });
         
         const currentCount = messages.length + 2;
-        if (currentCount > 0 && currentCount % 6 === 0) {
+
+        if (needsImmediateSync || (currentCount > 0 && currentCount % 6 === 0)) {
              const sessionObj = sessions.find((s: any) => s.id === targetSessionId);
              const currentSummary = sessionObj?.projectSummary || '';
              const currentIssues = sessionObj?.issuesScratchpad || [];
-             const contextMsg = [...messages.slice(-4).map((m: any) => `[${m.role}]: ${m.content}`), `[user]: ${userMessage}`, `[model]: ${fullResponse}`].join('\n');
+             
+             let contextMsg = "";
+             if (needsImmediateSync) {
+                 contextMsg = [...messages.map((m: any) => `[${m.role}]: ${m.content}`), `[user]: ${userMessage}`, `[model]: ${cleanResponse}`].join('\n');
+             } else {
+                 contextMsg = [...messages.slice(-4).map((m: any) => `[${m.role}]: ${m.content}`), `[user]: ${userMessage}`, `[model]: ${cleanResponse}`].join('\n');
+             }
+             
              compressChatHistory(currentSummary, currentIssues, contextMsg).then(result => {
                  if (result) {
                      updateDoc(doc(db, 'chatSessions', targetSessionId!), { 
@@ -1072,12 +1083,15 @@ export function NexusChat({ user, isSidebarOpen = true, setIsSidebarOpen }: { us
         return; // Exit early since we already saved the message
       }
 
+      const needsImmediateSync = fullResponse.includes('[SYNC_SCRATCHPAD]');
+      const cleanResponse = fullResponse.replace(/\[SYNC_SCRATCHPAD\]/g, '').trim();
+
       // Save non-streamed response (slash commands, file analysis)
       const aiNonStreamRef = await addDoc(collection(db, `chatSessions/${targetSessionId}/messages`), {
         sessionId: targetSessionId,
         userId: user.uid,
         role: 'model',
-        content: fullResponse,
+        content: cleanResponse,
         parentId: activeUserMsgId,
         timestamp: serverTimestamp(),
         ...(attachmentUrl ? { attachmentUrl, attachmentType } : {})
@@ -1091,11 +1105,19 @@ export function NexusChat({ user, isSidebarOpen = true, setIsSidebarOpen }: { us
       });
 
       const currentCount = messages.length + 2;
-      if (currentCount > 0 && currentCount % 6 === 0) {
+
+      if (needsImmediateSync || (currentCount > 0 && currentCount % 6 === 0)) {
            const sessionObj = sessions.find((s: any) => s.id === targetSessionId);
            const currentSummary = sessionObj?.projectSummary || '';
            const currentIssues = sessionObj?.issuesScratchpad || [];
-           const contextMsg = [...messages.slice(-4).map((m: any) => `[${m.role}]: ${m.content}`), `[user]: ${userMessage}`, `[model]: ${fullResponse}`].join('\n');
+           
+           let contextMsg = "";
+           if (needsImmediateSync) {
+               contextMsg = [...messages.map((m: any) => `[${m.role}]: ${m.content}`), `[user]: ${userMessage}`, `[model]: ${cleanResponse}`].join('\n');
+           } else {
+               contextMsg = [...messages.slice(-4).map((m: any) => `[${m.role}]: ${m.content}`), `[user]: ${userMessage}`, `[model]: ${cleanResponse}`].join('\n');
+           }
+
            compressChatHistory(currentSummary, currentIssues, contextMsg).then(result => {
                if (result) {
                    updateDoc(doc(db, 'chatSessions', targetSessionId!), { 

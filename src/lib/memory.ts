@@ -23,6 +23,8 @@ Analyze the new context. Update the project summary AND the issues scratchpad.
 
 CRITICAL ISSUE DETECTION: You must extract active bugs from TWO sources: 1) Explicit user complaints in the text. 2) Implicit errors found inside any \`IDE Payload\` blocks (e.g., stack traces, red screen errors, failing tests). If a payload contains an error, log it as an active issue immediately, even if the user did not explicitly report it.
 
+MATHEMATICAL PRIORITY RULE: You MUST prioritize explicitly acknowledged bugs in the very last user/assistant exchange above all earlier context. If the AI stated it is actively adding a bug to the scratchpad (e.g., "أضفتها للسجل", "I have registered a critical bug"), you MUST generate that structured JSON issue immediately without fail.
+
 Current Summary: ${currentSummary || 'None'}
 Current Issues: ${issuesStr}
 
