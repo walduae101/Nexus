@@ -108,48 +108,13 @@ function NexusWorkspace({ user, isSidebarOpen, setIsSidebarOpen, signOut, auth, 
     <div className={`w-full h-screen ${sizeClass}`} style={fontStyle}>
       {globalDefaults && globalDefaults.hasCompletedOnboarding === false && <OnboardingWizard />}
       <div className="flex h-full bg-background text-foreground overflow-hidden">
-        <div className="flex flex-col w-full max-w-7xl mx-auto">
-          <header className="flex items-center justify-between p-4 border-b border-zinc-800/50 bg-card/50">
-            <div className="flex items-center gap-2">
-              <Button variant="ghost" size="icon" onClick={() => setIsSidebarOpen(!isSidebarOpen)} className="text-muted-foreground hidden md:flex shrink-0">
-                {isSidebarOpen ? <PanelLeftClose className="w-5 h-5" /> : <PanelLeftOpen className="w-5 h-5" />}
-              </Button>
-              <img src="/logo.png" alt="Nexus Logo" className="w-10 h-10 object-contain" />
-              <div className="flex flex-col">
-                <h1 className="text-xl font-light tracking-[0.2em] uppercase leading-none">NEXUS</h1>
-              </div>
-            </div>
-            <div className="flex items-center gap-4">
-              <DropdownMenu>
-                <DropdownMenuTrigger className="inline-flex items-center justify-center rounded-md w-9 h-9 shrink-0 hover:bg-muted text-muted-foreground hover:text-foreground transition-colors outline-none cursor-pointer">
-                  <Globe className="w-5 h-5" />
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
-                  <DropdownMenuItem onClick={() => i18n.changeLanguage('en')}>
-                    English
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => i18n.changeLanguage('ar')}>
-                    العربية
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-              <GlobalSettings />
-              <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                <img src={user.photoURL || ''} alt={t('avatar')} className="w-8 h-8 rounded-full border border-border" referrerPolicy="no-referrer" />
-                <span className="hidden sm:inline">{user.displayName}</span>
-              </div>
-              <Button variant="ghost" size="icon" onClick={() => signOut(auth)} className="text-muted-foreground hover:text-foreground">
-                <LogOut className="w-5 h-5" />
-              </Button>
-            </div>
-          </header>
-
-          <main className="flex-1 overflow-hidden flex flex-col p-6 md:p-8 relative">
+        <div className="flex flex-col w-full h-full max-w-7xl mx-auto">
+          <main className="flex-1 overflow-hidden flex flex-col relative">
             <ReleaseNotesModal />
             <SparksIntroModal />
             <DualModeIntroModal />
-            <div className="flex-1 overflow-hidden flex flex-col">
-              <NexusChat user={user} isSidebarOpen={isSidebarOpen} />
+            <div className="flex-1 overflow-hidden flex flex-col bg-background">
+              <NexusChat user={user} isSidebarOpen={isSidebarOpen} setIsSidebarOpen={setIsSidebarOpen} />
             </div>
           </main>
         </div>

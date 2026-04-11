@@ -1,8 +1,10 @@
 import { useState, useEffect } from 'react';
 import { Bug, BrainCircuit, Search, MessageSquare, MousePointer2, RotateCw, Sparkles, X } from 'lucide-react';
+import { useSettings } from '@/contexts/SettingsContext';
 
 export function ReleaseNotesModal() {
   const [isOpen, setIsOpen] = useState(false);
+  const { globalDefaults } = useSettings();
 
   useEffect(() => {
     const hasSeen = localStorage.getItem('nexus_v1_release_notes');
@@ -16,41 +18,43 @@ export function ReleaseNotesModal() {
 
   if (!isOpen) return null;
 
+  const isArabic = globalDefaults?.userLang?.startsWith('ar');
+
   const features = [
     {
       icon: Bug,
-      title: "Issues Scratchpad",
-      desc: "Nexus now permanently remembers active bugs and past failed fixes to prevent the 'AI loop of death.'"
+      title: isArabic ? "سجل المشاكل" : "Issues Scratchpad",
+      desc: isArabic ? "يتذكر نكسس الآن بشكل دائم الأخطاء النشطة والإصلاحات الفاشلة السابقة لتجنب تكرارها أو الدخول في دوامة الذكاء الاصطناعي." : "Nexus now permanently remembers active bugs and past failed fixes to prevent the 'AI loop of death.'"
     },
     {
       icon: BrainCircuit,
-      title: "Continuous Memory Pipeline",
-      desc: "Background summarization ensures Nexus never loses track of your tech stack or architecture in long conversations."
+      title: isArabic ? "مسار الذاكرة المستمر" : "Continuous Memory Pipeline",
+      desc: isArabic ? "يضمن التلخيص التلقائي في الخلفية ألا يفقد نكسس مسار التقنيات المستخدمة أو بنية المشروع في المحادثات الطويلة." : "Background summarization ensures Nexus never loses track of your tech stack or architecture in long conversations."
     },
     {
       icon: Search,
-      title: "Async Deep-Search",
-      desc: "Instantly query historical databases to find code snippets across all your past sessions."
+      title: isArabic ? "بحث عميق غير متزامن" : "Async Deep-Search",
+      desc: isArabic ? "استعلم فوراً في قواعد البيانات التاريخية للعثور على مقتطفات الأكواد البرمجية عبر جميع جلساتك السابقة." : "Instantly query historical databases to find code snippets across all your past sessions."
     },
     {
       icon: MessageSquare,
-      title: "In-Chat Search",
-      desc: "Visually highlight and isolate specific terms within your active conversation timeline."
+      title: isArabic ? "البحث داخل المحادثة" : "In-Chat Search",
+      desc: isArabic ? "إبراز وعزل مصطلحات معينة بوضوح داخل المخطط الزمني لمحادثتك النشطة." : "Visually highlight and isolate specific terms within your active conversation timeline."
     },
     {
       icon: MousePointer2,
-      title: "Smart Auto-Scroll",
-      desc: "Scroll back through chat history without being yanked to the bottom while the AI is generating code."
+      title: isArabic ? "التمرير التلقائي الذكي" : "Smart Auto-Scroll",
+      desc: isArabic ? "تصفح سجل المحادثة للأعلى دون أن يتم سحبك للأسفل إجبارياً أثناء قيام الذكاء الاصطناعي بإنشاء الأكواد." : "Scroll back through chat history without being yanked to the bottom while the AI is generating code."
     },
     {
       icon: RotateCw,
-      title: "Message Regeneration",
-      desc: "Seamlessly re-roll AI responses and prune conversational branches with a single click."
+      title: isArabic ? "إعادة توليد الرسائل" : "Message Regeneration",
+      desc: isArabic ? "أعد توليد ردود الذكاء الاصطناعي واحذف التفرعات غير المرغوبة من المحادثة بنقرة واحدة." : "Seamlessly re-roll AI responses and prune conversational branches with a single click."
     }
   ];
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6 animate-in fade-in duration-300">
+    <div className={`fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6 animate-in fade-in duration-300 ${isArabic ? 'dir-rtl' : 'dir-ltr'}`}>
       {/* Backdrop */}
       <div 
         className="absolute inset-0 bg-black/80 backdrop-blur-sm" 
@@ -63,17 +67,21 @@ export function ReleaseNotesModal() {
         {/* Header Ribbon */}
         <div className="bg-primary/10 border-b border-primary/20 px-6 py-5 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="p-2 bg-primary/20 rounded-lg">
+            <div className="p-2 bg-primary/20 rounded-lg shrink-0">
               <Sparkles className="w-5 h-5 text-primary" />
             </div>
             <div>
-              <h2 className="text-xl font-bold text-primary tracking-wide uppercase">System Update</h2>
-              <p className="text-sm text-zinc-400">Nexus Architecture V1.0</p>
+              <h2 className="text-xl font-bold text-primary tracking-wide uppercase">
+                {isArabic ? "تحديث النظام: بنية نكسس الإصدار 1.0" : "SYSTEM UPDATE: Nexus Architecture V1.0"}
+              </h2>
+              <p className="text-sm text-zinc-400">
+                {isArabic ? "بنية نكسس الإصدار 1.0" : "Nexus Architecture V1.0"}
+              </p>
             </div>
           </div>
           <button 
             onClick={handleDismiss}
-            className="text-zinc-500 hover:text-zinc-300 transition-colors"
+            className={`text-zinc-500 hover:text-zinc-300 transition-colors ${isArabic ? 'me-auto ms-0' : ''}`}
           >
             <X className="w-5 h-5" />
           </button>
@@ -82,7 +90,9 @@ export function ReleaseNotesModal() {
         {/* Scrolling Content Area */}
         <div className="max-h-[60vh] overflow-y-auto px-6 py-6 border-b border-zinc-800/50 custom-scrollbar">
           <p className="text-zinc-300 mb-8 leading-relaxed text-[15px]">
-            The core Nexus environment has been massively upgraded on the backend for long-term project stability, speed, and deep-context retention. Review the tactical upgrades deployed to your workspace:
+            {isArabic 
+              ? "تم ترقية بيئة نكسس الأساسية بشكل شامل في الخلفية لضمان استقرار المشاريع طويلة الأمد، السرعة، والاحتفاظ بالسياق العميق. راجع التحديثات التكتيكية التي تم نشرها في بيئة عملك:" 
+              : "The core Nexus environment has been massively upgraded on the backend for long-term project stability, speed, and deep-context retention. Review the tactical upgrades deployed to your workspace:"}
           </p>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-8">
@@ -101,12 +111,12 @@ export function ReleaseNotesModal() {
         </div>
 
         {/* Footer */}
-        <div className="p-5 bg-zinc-900/30 flex justify-end">
+        <div className={`p-5 bg-zinc-900/30 flex ${isArabic ? 'justify-start' : 'justify-end'}`}>
           <button 
             onClick={handleDismiss}
             className="bg-primary hover:bg-primary/90 text-primary-foreground focus:ring-4 focus:ring-primary/20 font-medium py-2.5 px-6 rounded-lg transition-all shadow-lg flex items-center gap-2"
           >
-            Acknowledge & Initialize
+            {isArabic ? "فهمت، ابدأ التشغيل" : "Acknowledge & Initialize"}
           </button>
         </div>
 

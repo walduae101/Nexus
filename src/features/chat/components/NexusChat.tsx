@@ -1,7 +1,8 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { User } from 'firebase/auth';
 import { collection, query, orderBy, onSnapshot, addDoc, serverTimestamp, doc, setDoc, where, updateDoc, deleteDoc, getDocs, limit } from 'firebase/firestore';
-import { db, handleFirestoreError, OperationType, storage } from '@/lib/firebase';
+import { db, handleFirestoreError, OperationType, storage, auth } from '@/lib/firebase';
+import { signOut } from 'firebase/auth';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { chatWithNexus, generateImage, searchGrounding, textToSpeech, analyzeMedia, transcribeAudio, fastTask } from '@/lib/gemini';
 import { compressChatHistory } from '@/lib/memory';
@@ -10,7 +11,7 @@ import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue, SelectGroup, SelectLabel, SelectSeparator } from '@/components/ui/select';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Card, CardContent } from '@/components/ui/card';
-import { Send, Bot, User as UserIcon, Loader2, Paperclip, X, Image as ImageIcon, Mic, Search, Video, Plus, MessageSquare, Pencil, Check, Trash2, Download, UploadCloud, Play, Settings, Info, FolderSync, Copy, Wand2, Globe, Volume2, MoreVertical, Pin, ChevronUp, ChevronDown, ChevronLeft, ChevronRight, Lightbulb, Sparkles, Terminal, Square, ArrowDown } from 'lucide-react';
+import { Send, Bot, User as UserIcon, Loader2, Paperclip, X, Image as ImageIcon, Mic, Search, Video, Plus, MessageSquare, Pencil, Check, Trash2, Download, UploadCloud, Play, Settings, Info, FolderSync, Copy, Wand2, Globe, Volume2, MoreVertical, Pin, ChevronUp, ChevronDown, ChevronLeft, ChevronRight, Lightbulb, Sparkles, Terminal, Square, ArrowDown, PanelLeftClose, PanelLeftOpen, LogOut } from 'lucide-react';
 import Markdown from 'react-markdown';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogClose, DialogTrigger } from '@/components/ui/dialog';
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from '@/components/ui/sheet';
@@ -23,6 +24,7 @@ import { useSettings } from '@/contexts/SettingsContext';
 import { useTranslation } from 'react-i18next';
 import TextareaAutosize from 'react-textarea-autosize';
 import { TechStackSelector, TECH_STACKS } from '@/features/core/components/TechStackSelector';
+import { GlobalSettings } from '@/features/settings/components/GlobalSettings';
 import { Github } from 'lucide-react';
 
 export interface Spark {
@@ -51,7 +53,7 @@ export const generateSyncPrompt = (userPreferences?: string) => {
   return `${baseInstruction}\n\n${ongoingRule}`;
 };
 
-export function NexusChat({ user, isSidebarOpen = true }: { user: User; isSidebarOpen?: boolean }) {
+export function NexusChat({ user, isSidebarOpen = true, setIsSidebarOpen }: { user: User; isSidebarOpen?: boolean; setIsSidebarOpen?: (open: boolean) => void }) {
   const { t, i18n } = useTranslation();
   const { savedLanguages, savedIdes, savedInstructions, customModes, globalDefaults } = useSettings();
   const [sessions, setSessions] = useState<any[]>([]);
@@ -1195,8 +1197,20 @@ export function NexusChat({ user, isSidebarOpen = true }: { user: User; isSideba
   return (
     <div className="flex h-full">
       {/* Sidebar */}
-      <div className={`border-e border-zinc-800/50 bg-muted/10 flex-col hidden md:flex transition-all duration-300 ease-in-out ${isSidebarOpen ? 'w-64 opacity-100' : 'w-0 opacity-0 overflow-hidden border-none'}`}>
-        <div className="p-4 border-b border-zinc-800/50 flex flex-col gap-3">
+      <div className={`border-e border-zinc-800/50 bg-muted/10 flex-col hidden md:flex transition-all duration-300 ease-in-out ${isSidebarOpen ? 'w-64 opacity-100 flex-none' : 'w-0 opacity-0 overflow-hidden border-none'}`}>
+        <div className="flex items-center justify-between p-4 border-b border-border/50 shrink-0">
+          <div className="flex items-center gap-2">
+            <img src="/logo.png" alt="Nexus Logo" className="w-8 h-8 object-contain" />
+            <div className="flex flex-col">
+              <h1 className="text-lg font-light tracking-[0.2em] uppercase leading-none">NEXUS</h1>
+            </div>
+          </div>
+          <Button variant="ghost" size="icon" onClick={() => setIsSidebarOpen?.(!isSidebarOpen)} className="text-muted-foreground shrink-0 w-8 h-8">
+            <PanelLeftClose className="w-4 h-4" />
+          </Button>
+        </div>
+        
+        <div className="p-4 border-b border-zinc-800/50 flex flex-col gap-3 shrink-0">
           <Button onClick={createNewSession} className="w-full bg-primary hover:bg-primary/90 text-primary-foreground">
             <Plus className="w-4 h-4 me-2" /> {t('new_chat')}
           </Button>
@@ -1311,6 +1325,32 @@ export function NexusChat({ user, isSidebarOpen = true }: { user: User; isSideba
             )))}
           </div>
         </ScrollArea>
+        
+        {/* Bottom User Controls */}
+        <div className="mt-auto border-t border-border/50 p-4 shrink-0 bg-background/50">
+          <div className="flex items-center gap-3 mb-4">
+            <img src={user.photoURL || ''} alt={t('avatar') || 'Avatar'} className="w-9 h-9 rounded-full border border-border shrink-0" referrerPolicy="no-referrer" />
+            <div className="flex flex-col min-w-0">
+              <span className="text-sm font-medium truncate w-full text-foreground">{user.displayName}</span>
+              <span className="text-xs text-muted-foreground truncate w-full">{user.email}</span>
+            </div>
+          </div>
+          <div className="flex items-center justify-between gap-1 w-full">
+            <GlobalSettings />
+            <DropdownMenu>
+              <DropdownMenuTrigger className="inline-flex items-center justify-center rounded-md w-9 h-9 shrink-0 hover:bg-muted text-muted-foreground hover:text-foreground transition-colors outline-none cursor-pointer">
+                <Globe className="w-4 h-4" />
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem onClick={() => i18n.changeLanguage('en')}>English</DropdownMenuItem>
+                <DropdownMenuItem onClick={() => i18n.changeLanguage('ar')}>العربية</DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+            <Button variant="ghost" size="icon" onClick={() => signOut(auth)} className="w-9 h-9 text-muted-foreground hover:text-destructive transition-colors">
+              <LogOut className="w-4 h-4" />
+            </Button>
+          </div>
+        </div>
       </div>
 
       {/* Main Chat Area */}
@@ -1320,11 +1360,17 @@ export function NexusChat({ user, isSidebarOpen = true }: { user: User; isSideba
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
       >
-        <div className="flex items-center justify-between p-4 border-b border-zinc-800/50 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 z-10">
-          <div className="flex flex-col">
-            <div className="font-semibold flex items-center gap-2">
-              {resolveTitle(sessions.find((s: any) => s.id === sessionId)?.title)}
-            </div>
+        <div className="flex items-center justify-between p-4 border-b border-zinc-800/50 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 z-10 shrink-0">
+          <div className="flex items-center gap-3">
+            {!isSidebarOpen && (
+              <Button variant="ghost" size="icon" onClick={() => setIsSidebarOpen?.(true)} className="text-muted-foreground hover:text-foreground md:flex shrink-0 w-8 h-8 -ms-2">
+                <PanelLeftOpen className="w-4 h-4" />
+              </Button>
+            )}
+            <div className="flex flex-col">
+              <div className="font-semibold flex items-center gap-2">
+                {resolveTitle(sessions.find((s: any) => s.id === sessionId)?.title)}
+              </div>
             {sessions.find(s => s.id === sessionId) || globalDefaults.globalTechStack?.length ? (
               <div className="flex items-center gap-1 mt-1">
                 {(() => {
@@ -1348,6 +1394,7 @@ export function NexusChat({ user, isSidebarOpen = true }: { user: User; isSideba
                 )}
               </div>
             ) : null}
+            </div>
           </div>
 
           <div className="flex items-center gap-2">
@@ -1762,8 +1809,8 @@ export function NexusChat({ user, isSidebarOpen = true }: { user: User; isSideba
           </button>
         </div>
       )}
-      <div className="p-4 flex flex-col gap-2">
-        <div className="max-w-4xl mx-auto w-full mb-2 sm:mb-6 rounded-2xl bg-zinc-900/80 backdrop-blur-md border border-zinc-800/50 shadow-2xl p-2 flex flex-col gap-2 focus-within:ring-0 focus-within:ring-offset-0 focus-within:outline-none">
+      <div className="px-4 pb-3 pt-2 flex flex-col gap-1">
+        <div className="max-w-4xl mx-auto w-full rounded-2xl bg-zinc-900/80 backdrop-blur-md border border-zinc-800/50 shadow-2xl p-2 flex flex-col gap-2 focus-within:ring-0 focus-within:ring-offset-0 focus-within:outline-none">
           {selectedFiles.length > 0 && (
             <div className="flex items-center gap-2 mb-2 overflow-x-auto custom-scrollbar pb-2 pt-2 px-1">
               {selectedFiles.map((file, idx) => (
@@ -1905,9 +1952,14 @@ export function NexusChat({ user, isSidebarOpen = true }: { user: User; isSideba
                 <Send className="w-4 h-4" />
               </Button>
             )}
-          </form>
+            </form>
           </div>
         </div>
+        <p className="text-xs text-center text-muted-foreground mt-1 mb-0 opacity-70">
+          {globalDefaults?.userLang?.startsWith('ar') 
+            ? 'نكسس هو ذكاء اصطناعي وقد يرتكب أخطاء.' 
+            : 'Nexus is AI and can make mistakes.'}
+        </p>
       </div>
       </div>
 
