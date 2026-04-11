@@ -68,6 +68,8 @@ export function NexusChat({ user, isSidebarOpen = true, setIsSidebarOpen }: { us
   const [searchResults, setSearchResults] = useState<any[]>([]);
   const [localSearchQuery, setLocalSearchQuery] = useState('');
   const [showLocalSearch, setShowLocalSearch] = useState(false);
+  const [searchMatches, setSearchMatches] = useState<string[]>([]);
+  const [activeMatchIndex, setActiveMatchIndex] = useState(0);
   
   const abortControllerRef = useRef<AbortController | null>(null);
 
@@ -552,6 +554,43 @@ export function NexusChat({ user, isSidebarOpen = true, setIsSidebarOpen }: { us
     }
     return thread;
   }, [messages, activeLeafId]);
+
+  useEffect(() => {
+    if (!localSearchQuery.trim()) {
+      setSearchMatches([]);
+      setActiveMatchIndex(0);
+      return;
+    }
+    const lowerQuery = localSearchQuery.toLowerCase();
+    const matches = activeThread.filter(m => 
+      (m.content && m.content.toLowerCase().includes(lowerQuery)) || 
+      (m.idePayload && m.idePayload.toLowerCase().includes(lowerQuery))
+    ).map(m => m.id);
+    
+    setSearchMatches(matches);
+    setActiveMatchIndex(0);
+    if (matches.length > 0) {
+      setTimeout(() => scrollToMessage(matches[0]), 50);
+    }
+  }, [localSearchQuery, activeThread]);
+
+  const scrollToMessage = (messageId: string) => {
+    document.getElementById(`message-${messageId}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  };
+
+  const handleNextMatch = () => {
+    if (searchMatches.length === 0) return;
+    const nextIdx = (activeMatchIndex + 1) % searchMatches.length;
+    setActiveMatchIndex(nextIdx);
+    scrollToMessage(searchMatches[nextIdx]);
+  };
+
+  const handlePrevMatch = () => {
+    if (searchMatches.length === 0) return;
+    const prevIdx = activeMatchIndex === 0 ? searchMatches.length - 1 : activeMatchIndex - 1;
+    setActiveMatchIndex(prevIdx);
+    scrollToMessage(searchMatches[prevIdx]);
+  };
 
   // Progressive Auto-Titling Engine
   useEffect(() => {
@@ -1403,17 +1442,30 @@ export function NexusChat({ user, isSidebarOpen = true, setIsSidebarOpen }: { us
                 <Search className="w-5 h-5" />
               </Button>
             ) : (
-              <div className="flex items-center bg-zinc-900/50 border border-zinc-800 rounded-lg px-2 h-9 w-48 sm:w-64 transition-all">
+              <div className="flex items-center bg-zinc-900/50 border border-zinc-800 rounded-lg px-2 h-9 w-64 transition-all">
                 <Search className="w-4 h-4 text-muted-foreground shrink-0" />
                 <Input
                   value={localSearchQuery}
                   onChange={(e) => setLocalSearchQuery(e.target.value)}
                   placeholder={globalDefaults?.userLang?.startsWith('ar') ? 'بحث في المحادثة...' : 'Find in chat...'}
-                  className="border-0 bg-transparent h-8 focus-visible:ring-0 focus-visible:ring-offset-0 px-2 text-sm w-full"
+                  className="border-0 bg-transparent h-8 focus-visible:ring-0 focus-visible:ring-offset-0 px-1 text-sm w-full"
                   autoFocus
                 />
-                <Button variant="ghost" size="icon" className="h-6 w-6 shrink-0 rounded-full" onClick={() => { setShowLocalSearch(false); setLocalSearchQuery(''); }}>
-                  <X className="w-3 h-3" />
+                {searchMatches.length > 0 && (
+                  <div className="flex items-center gap-0.5 mx-1 shrink-0">
+                    <span className="text-[10px] tabular-nums text-muted-foreground mr-1 whitespace-nowrap">
+                      {activeMatchIndex + 1} / {searchMatches.length}
+                    </span>
+                    <Button variant="ghost" size="icon" className="h-5 w-5 rounded-sm hover:bg-zinc-800" onClick={handlePrevMatch}>
+                      <ChevronUp className="w-3.5 h-3.5 text-muted-foreground" />
+                    </Button>
+                    <Button variant="ghost" size="icon" className="h-5 w-5 rounded-sm hover:bg-zinc-800" onClick={handleNextMatch}>
+                      <ChevronDown className="w-3.5 h-3.5 text-muted-foreground" />
+                    </Button>
+                  </div>
+                )}
+                <Button variant="ghost" size="icon" className="h-6 w-6 shrink-0 rounded-full hover:bg-zinc-800 ml-0.5" onClick={() => { setShowLocalSearch(false); setLocalSearchQuery(''); }}>
+                  <X className="w-3.5 h-3.5 text-muted-foreground" />
                 </Button>
               </div>
             )}
@@ -1791,6 +1843,7 @@ export function NexusChat({ user, isSidebarOpen = true, setIsSidebarOpen }: { us
             onDelete={deleteMessageBranch}
             onRegenerate={handleRegenerate}
             localSearchQuery={localSearchQuery}
+            isActiveSearchMatch={msg.id === searchMatches[activeMatchIndex]}
           />
         ))}
         {processingAction && <LoadingBubble action={processingAction} />}

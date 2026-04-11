@@ -21,6 +21,8 @@ Analyze the new context. Update the project summary AND the issues scratchpad.
 1. PROJECT SUMMARY: Keep it highly compressed, technical, and factual. Track: Tech Stack, Core Architecture, Completed Features, and Current Objective.
 2. ISSUES SCRATCHPAD: Extract active bugs or errors mentioned. If an existing issue was confirmed fixed in the context, change its status to "resolved". If fixes failed, append them to "attemptedFixes". If new errors originated, add them as "open".
 
+CRITICAL ISSUE DETECTION: You must extract active bugs from TWO sources: 1) Explicit user complaints in the text. 2) Implicit errors found inside any \`IDE Payload\` blocks (e.g., stack traces, red screen errors, failing tests). If a payload contains an error, log it as an active issue immediately, even if the user did not explicitly report it.
+
 Current Summary: ${currentSummary || 'None'}
 Current Issues: ${issuesStr}
 

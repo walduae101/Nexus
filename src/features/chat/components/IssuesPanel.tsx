@@ -2,11 +2,16 @@ import { Bug, CheckCircle2, CircleDashed, TerminalSquare, AlertCircle } from 'lu
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from '@/components/ui/sheet';
 import { Issue } from '@/lib/memory';
 import { useState } from 'react';
+import { useSettings } from '@/contexts/SettingsContext';
 
 export function IssuesPanel({ issues }: { issues: Issue[] }) {
   const [isOpen, setIsOpen] = useState(false);
+  const { globalDefaults } = useSettings();
+  
   const activeIssues = issues.filter(i => i.status === 'open');
   const resolvedIssues = issues.filter(i => i.status === 'resolved');
+  
+  const isArabic = globalDefaults?.userLang?.startsWith('ar');
 
   return (
     <Sheet open={isOpen} onOpenChange={setIsOpen}>
@@ -20,11 +25,11 @@ export function IssuesPanel({ issues }: { issues: Issue[] }) {
           )}
         </div>
       </SheetTrigger>
-      <SheetContent className="w-[400px] sm:w-[540px] overflow-y-auto custom-scrollbar bg-zinc-950 border-s border-zinc-800">
+      <SheetContent dir={isArabic ? 'rtl' : 'ltr'} className="w-[400px] sm:w-[540px] overflow-y-auto custom-scrollbar bg-zinc-950 border-s border-zinc-800">
         <SheetHeader>
           <SheetTitle className="text-xl font-bold flex items-center gap-2">
             <Bug className="w-5 h-5 text-red-500" />
-            Issues Scratchpad
+            {isArabic ? 'سجل المشاكل' : 'Issues Scratchpad'}
           </SheetTitle>
         </SheetHeader>
         
@@ -33,12 +38,12 @@ export function IssuesPanel({ issues }: { issues: Issue[] }) {
           <div>
             <h3 className="text-sm font-bold text-red-400 mb-3 flex items-center gap-2">
               <AlertCircle className="w-4 h-4" />
-              Active Bugs ({activeIssues.length})
+              {isArabic ? 'الأخطاء النشطة' : 'Active Bugs'} ({activeIssues.length})
             </h3>
             <div className="flex flex-col gap-3">
               {activeIssues.length === 0 ? (
                 <div className="text-sm text-zinc-500 italic bg-zinc-900/30 p-4 rounded-xl border border-zinc-800/50 text-center">
-                  All clear. No active issues tracked.
+                  {isArabic ? 'كل شيء على ما يرام. لا توجد مشاكل نشطة.' : 'All clear. No active issues tracked.'}
                 </div>
               ) : (
                 activeIssues.map(issue => (
@@ -49,8 +54,8 @@ export function IssuesPanel({ issues }: { issues: Issue[] }) {
                         <p className="text-sm text-zinc-200 font-medium mb-2">{issue.description}</p>
                         {issue.attemptedFixes && (
                           <div className="bg-black/40 rounded-lg p-3 border border-red-900/30">
-                            <h4 className="text-[10px] uppercase tracking-wider text-red-400/80 mb-1 font-bold">Failed Attempts</h4>
-                            <p className="text-xs text-zinc-400 font-mono leading-relaxed">{issue.attemptedFixes}</p>
+                            <h4 className="text-[10px] uppercase tracking-wider text-red-400/80 mb-1 font-bold">{isArabic ? 'المحاولات الفاشلة' : 'Failed Attempts'}</h4>
+                            <p className="text-xs text-zinc-400 font-mono leading-relaxed text-start rtl:text-right" dir="ltr">{issue.attemptedFixes}</p>
                           </div>
                         )}
                       </div>
@@ -65,12 +70,12 @@ export function IssuesPanel({ issues }: { issues: Issue[] }) {
           <div>
             <h3 className="text-sm font-bold text-green-500 mb-3 flex items-center gap-2">
               <CheckCircle2 className="w-4 h-4" />
-              Resolved Fixes ({resolvedIssues.length})
+              {isArabic ? 'الإصلاحات المنجزة' : 'Resolved Fixes'} ({resolvedIssues.length})
             </h3>
             <div className="flex flex-col gap-3">
               {resolvedIssues.length === 0 ? (
                 <div className="text-sm text-zinc-500 italic bg-zinc-900/30 p-4 rounded-xl border border-zinc-800/50 text-center">
-                  No resolved fixes recorded yet.
+                  {isArabic ? 'لم يتم تسجيل أي إصلاحات حتى الآن.' : 'No resolved fixes recorded yet.'}
                 </div>
               ) : (
                 resolvedIssues.map(issue => (
@@ -82,7 +87,9 @@ export function IssuesPanel({ issues }: { issues: Issue[] }) {
                         {issue.attemptedFixes && (
                           <div className="mt-2 text-[10px] text-zinc-500 flex items-start gap-1.5">
                             <TerminalSquare className="w-3 h-3 shrink-0 mt-0.5" />
-                            <span className="leading-snug">Avoided patterns: {issue.attemptedFixes}</span>
+                            <span className="leading-snug">
+                              {isArabic ? 'الأنماط المتجنبة:' : 'Avoided patterns:'} <span dir="ltr" className="inline-block mt-0.5">{issue.attemptedFixes}</span>
+                            </span>
                           </div>
                         )}
                       </div>

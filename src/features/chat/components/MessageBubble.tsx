@@ -8,7 +8,7 @@ import Markdown from 'react-markdown';
 import TextareaAutosize from 'react-textarea-autosize';
 import { MessageCopyButton, ActionableCodeBlock } from './ChatUIPrimitives';
 
-export function MessageBubble({ msg, user, sessionId, sessions, globalDefaults, isArabic, t, messages, activeLeafId, setActiveLeafId, onEditSubmit, onDelete, onRegenerate, localSearchQuery }: any) {
+export function MessageBubble({ msg, user, sessionId, sessions, globalDefaults, isArabic, t, messages, activeLeafId, setActiveLeafId, onEditSubmit, onDelete, onRegenerate, localSearchQuery, isActiveSearchMatch }: any) {
   const [isEditing, setIsEditing] = useState(false);
   const [editText, setEditText] = useState(msg.content);
 
@@ -79,6 +79,7 @@ export function MessageBubble({ msg, user, sessionId, sessions, globalDefaults, 
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.3 }}
+      id={`message-${msg.id}`}
       className={`flex gap-4 group ${msg.role === 'user' ? 'flex-row-reverse' : ''} ${showDimmed ? 'opacity-40 grayscale-[80%]' : ''}`}
     >
       <Avatar className="w-8 h-8 shrink-0">
@@ -96,7 +97,7 @@ export function MessageBubble({ msg, user, sessionId, sessions, globalDefaults, 
           </>
         )}
       </Avatar>
-      <div className={`relative max-w-[80%] rounded-2xl p-4 ${msg.role === 'user' ? 'bg-primary text-primary-foreground' : msg.role === 'system' ? 'bg-destructive/20 text-destructive border border-destructive/50' : 'bg-muted text-foreground'} ${isMatch ? 'ring-2 ring-primary ring-offset-2 ring-offset-background bg-primary/20 transition-all shadow-xl' : ''}`}>
+      <div className={`relative max-w-[80%] rounded-2xl p-4 ${msg.role === 'user' ? 'bg-primary text-primary-foreground' : msg.role === 'system' ? 'bg-destructive/20 text-destructive border border-destructive/50' : 'bg-muted text-foreground'} ${isActiveSearchMatch ? 'ring-4 ring-primary ring-offset-2 ring-offset-background bg-primary/30 shadow-2xl transition-all' : isMatch ? 'ring-2 ring-primary/50 ring-offset-2 ring-offset-background bg-primary/20 transition-all shadow-xl' : ''}`}>
         
         {siblings.length > 1 && (
           <div className={`flex items-center gap-2 mb-2 text-xs font-mono font-bold ${msg.role === 'user' ? 'text-primary-foreground/70' : 'text-muted-foreground'}`}>
