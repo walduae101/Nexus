@@ -58,6 +58,10 @@ export function NexusChat({ user, isSidebarOpen = true }: { user: User; isSideba
   const [messageLimit, setMessageLimit] = useState(50);
   const [activeLeafId, setActiveLeafId] = useState<string | null>(null);
   const [isScrolledUp, setIsScrolledUp] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState('');
+  const [isSearching, setIsSearching] = useState(false);
+  const [searchResults, setSearchResults] = useState<any[]>([]);
   
   const abortControllerRef = useRef<AbortController | null>(null);
 
@@ -117,6 +121,66 @@ export function NexusChat({ user, isSidebarOpen = true }: { user: User; isSideba
     const isUp = scrollHeight - scrollTop - clientHeight > 100;
     setIsScrolledUp(isUp);
   };
+
+  useEffect(() => {
+    const handler = setTimeout(() => {
+      setDebouncedSearchQuery(searchQuery);
+    }, 500);
+    return () => clearTimeout(handler);
+  }, [searchQuery]);
+
+  useEffect(() => {
+    const performSearch = async () => {
+      if (!debouncedSearchQuery.trim()) {
+        setSearchResults([]);
+        setIsSearching(false);
+        return;
+      }
+      setIsSearching(true);
+      try {
+        const lowerQuery = debouncedSearchQuery.toLowerCase();
+        const results: any[] = [];
+        
+        // Take up to top 20 sessions to prevent massive database strain.
+        const recentSessionIds = sessions.slice(0, 20).map((s: any) => s.id);
+        
+        for (const sId of recentSessionIds) {
+          const messagesQuery = query(collection(db, `chatSessions/${sId}/messages`), limit(100));
+          const messagesSnapshot = await getDocs(messagesQuery);
+          
+          for (const docSnap of messagesSnapshot.docs) {
+            const data = docSnap.data();
+            const content = typeof data.content === 'string' ? data.content : '';
+            const idePayload = typeof data.idePayload === 'string' ? data.idePayload : '';
+            
+            const fullText = (content + ' ' + idePayload).toLowerCase();
+            
+            if (fullText.includes(lowerQuery)) {
+              const originalFullText = (content + ' ' + idePayload);
+              const matchIndex = fullText.indexOf(lowerQuery);
+              const start = Math.max(0, matchIndex - 30);
+              const end = Math.min(originalFullText.length, matchIndex + lowerQuery.length + 30);
+              const snippet = (start > 0 ? '...' : '') + originalFullText.substring(start, end).replace(/\n/g, ' ') + (end < originalFullText.length ? '...' : '');
+              
+              results.push({
+                sessionId: sId,
+                title: sessions.find((s: any) => s.id === sId)?.title || 'Unknown',
+                matchedSnippet: snippet,
+              });
+              break; // Found in this session, move to next
+            }
+          }
+        }
+        setSearchResults(results);
+      } catch (error) {
+        console.error('Deep Search Error:', error);
+      } finally {
+        setIsSearching(false);
+      }
+    };
+    
+    performSearch();
+  }, [debouncedSearchQuery, sessions]);
 
   useEffect(() => {
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
@@ -1094,14 +1158,48 @@ export function NexusChat({ user, isSidebarOpen = true }: { user: User; isSideba
     <div className="flex h-full">
       {/* Sidebar */}
       <div className={`border-e border-zinc-800/50 bg-muted/10 flex-col hidden md:flex transition-all duration-300 ease-in-out ${isSidebarOpen ? 'w-64 opacity-100' : 'w-0 opacity-0 overflow-hidden border-none'}`}>
-        <div className="p-4 border-b border-zinc-800/50">
+        <div className="p-4 border-b border-zinc-800/50 flex flex-col gap-3">
           <Button onClick={createNewSession} className="w-full bg-primary hover:bg-primary/90 text-primary-foreground">
             <Plus className="w-4 h-4 me-2" /> {t('new_chat')}
           </Button>
+          <div className="relative">
+            <Search className="absolute left-2.5 top-2.5 w-4 h-4 text-muted-foreground" />
+            <Input 
+              placeholder={t('search_chats') || 'Deep search...'} 
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="pl-8 bg-background/50 border-zinc-800/50 h-9 text-sm"
+            />
+            {isSearching && (
+              <Loader2 className="absolute right-2.5 top-2.5 w-4 h-4 text-muted-foreground animate-spin" />
+            )}
+          </div>
         </div>
         <ScrollArea className="flex-1">
           <div className="p-2 space-y-1">
-            {sessions.map(session => (
+            {searchQuery ? (
+              searchResults.length > 0 ? (
+                searchResults.map(result => (
+                  <div 
+                    key={result.sessionId}
+                    onClick={() => {
+                      setSessionId(result.sessionId);
+                      setMessageLimit(50);
+                      setSearchQuery(''); // clear query
+                    }} 
+                    className={`w-full text-start p-3 rounded-lg transition-colors flex flex-col gap-1 cursor-pointer group hover:bg-muted/50 hover:text-foreground ${sessionId === result.sessionId ? 'bg-muted text-foreground' : 'text-muted-foreground'}`}
+                  >
+                    <div className="font-medium truncate text-sm text-foreground">{resolveTitle(result.title)}</div>
+                    <div className="text-xs italic truncate opacity-80">{result.matchedSnippet}</div>
+                  </div>
+                ))
+              ) : (
+                <div className="text-center text-sm text-muted-foreground py-4">
+                  {isSearching ? (t('searching') || 'Searching...') : (t('no_results') || 'No results found.')}
+                </div>
+              )
+            ) : (
+              sessions.map(session => (
               <div 
                 key={session.id}
                 onClick={() => {
@@ -1172,7 +1270,7 @@ export function NexusChat({ user, isSidebarOpen = true }: { user: User; isSideba
                   </div>
                 </div>
               </div>
-            ))}
+            )))}
           </div>
         </ScrollArea>
       </div>
