@@ -4,6 +4,7 @@ import { collection, query, orderBy, onSnapshot, addDoc, serverTimestamp, doc, s
 import { db, handleFirestoreError, OperationType, storage } from '@/lib/firebase';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { chatWithNexus, generateImage, searchGrounding, textToSpeech, analyzeMedia, transcribeAudio, fastTask } from '@/lib/gemini';
+import { compressChatHistory } from '@/lib/memory';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue, SelectGroup, SelectLabel, SelectSeparator } from '@/components/ui/select';
@@ -1007,6 +1008,18 @@ export function NexusChat({ user, isSidebarOpen = true }: { user: User; isSideba
           updatedAt: serverTimestamp()
         });
         
+        const currentCount = messages.length + 2;
+        if (currentCount > 0 && currentCount % 6 === 0) {
+             const sessionObj = sessions.find((s: any) => s.id === targetSessionId);
+             const currentSummary = sessionObj?.projectSummary || '';
+             const contextMsg = [...messages.slice(-4).map((m: any) => `[${m.role}]: ${m.content}`), `[user]: ${userMessage}`, `[model]: ${fullResponse}`].join('\n');
+             compressChatHistory(currentSummary, contextMsg).then(newSummary => {
+                 if (newSummary) {
+                     updateDoc(doc(db, 'chatSessions', targetSessionId!), { projectSummary: newSummary }).catch(console.error);
+                 }
+             });
+        }
+        
         setIsLoading(false);
         return; // Exit early since we already saved the message
       }
@@ -1028,6 +1041,18 @@ export function NexusChat({ user, isSidebarOpen = true }: { user: User; isSideba
         activeLeafId: aiNonStreamRef.id,
         updatedAt: serverTimestamp()
       });
+
+      const currentCount = messages.length + 2;
+      if (currentCount > 0 && currentCount % 6 === 0) {
+           const sessionObj = sessions.find((s: any) => s.id === targetSessionId);
+           const currentSummary = sessionObj?.projectSummary || '';
+           const contextMsg = [...messages.slice(-4).map((m: any) => `[${m.role}]: ${m.content}`), `[user]: ${userMessage}`, `[model]: ${fullResponse}`].join('\n');
+           compressChatHistory(currentSummary, contextMsg).then(newSummary => {
+               if (newSummary) {
+                   updateDoc(doc(db, 'chatSessions', targetSessionId!), { projectSummary: newSummary }).catch(console.error);
+               }
+           });
+      }
 
     } catch (error) {
       console.error('Chat error:', error);

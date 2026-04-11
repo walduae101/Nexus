@@ -63,7 +63,7 @@ export async function chatWithNexus(
   history: { role: 'user' | 'model', parts: { text: string }[] }[], 
   message: string, 
   model: 'gemini-3.1-pro-preview' | 'gemini-3-flash-preview' | 'gemini-3.1-flash-lite-preview' = 'gemini-3.1-pro-preview',
-  settings?: { userLang?: string, ideLang?: string, targetIde?: string, customInstructions?: string, complexityModeName?: string, complexityModeRules?: string, techStackContext?: string, githubRepo?: string, sparksContext?: string },
+  settings?: { userLang?: string, ideLang?: string, targetIde?: string, customInstructions?: string, complexityModeName?: string, complexityModeRules?: string, techStackContext?: string, githubRepo?: string, sparksContext?: string, projectSummary?: string },
   abortSignal?: AbortSignal
 ) {
   const useThinking = model === 'gemini-3.1-pro-preview';
@@ -136,6 +136,11 @@ CRITICAL: You MUST mimic the exact structure, brevity, and format of the Nexus r
 `;
   
   dynamicInstruction += `\n\n${hardenedAgentDirective}`;
+
+  if (settings?.projectSummary) {
+    const memoryBlock = `\n\n[CURRENT PROJECT STATE & MEMORY]:\n${settings.projectSummary}\n\n`;
+    dynamicInstruction += memoryBlock;
+  }
 
   const chatWithHistory = ai.chats.create({
     model: model,
