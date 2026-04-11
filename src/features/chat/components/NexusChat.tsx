@@ -62,6 +62,8 @@ export function NexusChat({ user, isSidebarOpen = true }: { user: User; isSideba
   const [debouncedSearchQuery, setDebouncedSearchQuery] = useState('');
   const [isSearching, setIsSearching] = useState(false);
   const [searchResults, setSearchResults] = useState<any[]>([]);
+  const [localSearchQuery, setLocalSearchQuery] = useState('');
+  const [showLocalSearch, setShowLocalSearch] = useState(false);
   
   const abortControllerRef = useRef<AbortController | null>(null);
 
@@ -1165,7 +1167,7 @@ export function NexusChat({ user, isSidebarOpen = true }: { user: User; isSideba
           <div className="relative">
             <Search className="absolute left-2.5 top-2.5 w-4 h-4 text-muted-foreground" />
             <Input 
-              placeholder={t('search_chats') || 'Deep search...'} 
+              placeholder={globalDefaults?.userLang?.startsWith('ar') ? 'البحث في المحادثات...' : 'Search chats...'} 
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="pl-8 bg-background/50 border-zinc-800/50 h-9 text-sm"
@@ -1312,7 +1314,26 @@ export function NexusChat({ user, isSidebarOpen = true }: { user: User; isSideba
             ) : null}
           </div>
 
-          <div className="flex items-center">
+          <div className="flex items-center gap-2">
+            {!showLocalSearch ? (
+              <Button variant="ghost" size="icon" onClick={() => setShowLocalSearch(true)} className="text-muted-foreground hover:text-foreground">
+                <Search className="w-5 h-5" />
+              </Button>
+            ) : (
+              <div className="flex items-center bg-zinc-900/50 border border-zinc-800 rounded-lg px-2 h-9 w-48 sm:w-64 transition-all">
+                <Search className="w-4 h-4 text-muted-foreground shrink-0" />
+                <Input
+                  value={localSearchQuery}
+                  onChange={(e) => setLocalSearchQuery(e.target.value)}
+                  placeholder={globalDefaults?.userLang?.startsWith('ar') ? 'بحث في المحادثة...' : 'Find in chat...'}
+                  className="border-0 bg-transparent h-8 focus-visible:ring-0 focus-visible:ring-offset-0 px-2 text-sm w-full"
+                  autoFocus
+                />
+                <Button variant="ghost" size="icon" className="h-6 w-6 shrink-0 rounded-full" onClick={() => { setShowLocalSearch(false); setLocalSearchQuery(''); }}>
+                  <X className="w-3 h-3" />
+                </Button>
+              </div>
+            )}
             <Sheet open={isSparksOpen} onOpenChange={setIsSparksOpen}>
               <SheetTrigger>
                 <div role="button" aria-label="Sparks" className="group relative w-10 h-10 inline-flex items-center justify-center text-muted-foreground hover:text-foreground">
@@ -1685,6 +1706,7 @@ export function NexusChat({ user, isSidebarOpen = true }: { user: User; isSideba
             onEditSubmit={(content: string) => sendMessage(msg.parentId, content)}
             onDelete={deleteMessageBranch}
             onRegenerate={handleRegenerate}
+            localSearchQuery={localSearchQuery}
           />
         ))}
         {processingAction && <LoadingBubble action={processingAction} />}
