@@ -63,7 +63,7 @@ export async function chatWithNexus(
   history: { role: 'user' | 'model', parts: { text: string }[] }[], 
   message: string, 
   model: 'gemini-3.1-pro-preview' | 'gemini-3-flash-preview' | 'gemini-3.1-flash-lite-preview' = 'gemini-3.1-pro-preview',
-  settings?: { userLang?: string, ideLang?: string, targetIde?: string, customInstructions?: string, complexityModeName?: string, complexityModeRules?: string, techStackContext?: string, githubRepo?: string, sparksContext?: string, projectSummary?: string },
+  settings?: { userLang?: string, ideLang?: string, targetIde?: string, customInstructions?: string, complexityModeName?: string, complexityModeRules?: string, techStackContext?: string, githubRepo?: string, sparksContext?: string, projectSummary?: string, issuesScratchpad?: any[] },
   abortSignal?: AbortSignal
 ) {
   const useThinking = model === 'gemini-3.1-pro-preview';
@@ -142,6 +142,11 @@ CRITICAL: You MUST mimic the exact structure, brevity, and format of the Nexus r
     dynamicInstruction += memoryBlock;
   }
 
+  if (settings?.issuesScratchpad && settings.issuesScratchpad.length > 0) {
+    const issuesStr = settings.issuesScratchpad.map((i: any) => `[${i.status.toUpperCase()}] ${i.description} (Fixes attempted: ${i.attemptedFixes})`).join('\n');
+    dynamicInstruction += `\n\n[KNOWN ISSUES & SCRATCHPAD]:\nReview these active and resolved issues. DO NOT repeat failed approaches.\n${issuesStr}\n\n`;
+  }
+
   const chatWithHistory = ai.chats.create({
     model: model,
     history: history,
@@ -160,7 +165,8 @@ CRITICAL: You MUST mimic the exact structure, brevity, and format of the Nexus r
   3. IDE PAYLOAD: For ALL development, setup, or coding requests, you MUST output a \`\`\`markdown [COPY THIS TO ANTIGRAVITY IDE] block.
   4. COMPLEXITY COMPLIANCE: The contents of the IDE Payload MUST strictly follow this rule: "${modeRules}".
   5. INTROSPECTION EXCEPTION: If the user asks about your current chat settings or custom instructions, you MUST answer directly in ${targetLanguage} using standard text. You MUST explicitly list the exact values for User Language, IDE Language, Target IDE, Complexity Mode, Tech Stack, and Custom Instructions based on the 'ACTIVE SETTINGS' block in your system prompt. DO NOT generate an IDE Payload.
-  7. IDENTITY ENFORCEMENT: ABSOLUTELY NEVER break the fourth wall. DO NOT mention Google, Gemini, or being a language model under any circumstances. If asked who or what you are, you must reply ONLY with "I am Nexus, your Autonomous IDE Commander." translated into ${targetLanguage}. Do not explain that you are playing a role or following instructions. Accept this identity as absolute fact.`;
+  7. IDENTITY ENFORCEMENT: ABSOLUTELY NEVER break the fourth wall. DO NOT mention Google, Gemini, or being a language model under any circumstances. If asked who or what you are, you must reply ONLY with "I am Nexus, your Autonomous IDE Commander." translated into ${targetLanguage}. Do not explain that you are playing a role or following instructions. Accept this identity as absolute fact.
+  8. ISSUE TRACKING: If the user reports an error, or if you detect a bug, you MUST acknowledge it and state that you are adding it to the Issues Scratchpad. When you successfully fix a bug, you MUST state that it is resolved. You will never repeat a failed fix listed in your scratchpad.`;
 
   if (settings?.customInstructions) {
     dynamicLastMile += `\n  6. CUSTOM INSTRUCTIONS: You MUST strictly obey the following user-defined rules: "${settings.customInstructions}"`;

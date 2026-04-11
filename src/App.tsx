@@ -20,6 +20,7 @@ import { OnboardingWizard } from '@/features/onboarding/components/OnboardingWiz
 import { GlobalSettings } from '@/features/settings/components/GlobalSettings';
 import { SparksIntroModal } from '@/features/sparks/components/SparksIntroModal';
 import { DualModeIntroModal } from '@/features/chat/components/DualModeIntroModal';
+import { ReleaseNotesModal } from '@/components/ReleaseNotesModal';
 import { TooltipProvider } from '@/components/ui/tooltip';
 
 function AppContent() {
@@ -144,6 +145,7 @@ function NexusWorkspace({ user, isSidebarOpen, setIsSidebarOpen, signOut, auth, 
           </header>
 
           <main className="flex-1 overflow-hidden flex flex-col p-6 md:p-8 relative">
+            <ReleaseNotesModal />
             <SparksIntroModal />
             <DualModeIntroModal />
             <div className="flex-1 overflow-hidden flex flex-col">

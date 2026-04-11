@@ -37,6 +37,7 @@ const isArabic = (text: string) => /[\u0600-\u06FF]/.test(text || '');
 
 import { MessageBubble } from '@/features/chat/components/MessageBubble';
 import { MessageCopyButton, ActionableCodeBlock, RelativeTime, LoadingBubble } from '@/features/chat/components/ChatUIPrimitives';
+import { IssuesPanel } from '@/features/chat/components/IssuesPanel';
 
 export const generateSyncPrompt = (userPreferences?: string) => {
   const baseInstruction = `I am coordinating our workflow with Nexus. To ensure we stay synchronized, please generate a comprehensive current-state summary of the workspace. Include the latest updates on our modular architecture, the current status of the game logic and UI/UX polish, and any active system-level configurations.`;
@@ -876,7 +877,9 @@ export function NexusChat({ user, isSidebarOpen = true }: { user: User; isSideba
           complexityModeRules: activeMode?.rules,
           techStackContext,
           githubRepo: activeSettingsData.githubRepo || '',
-          sparksContext: ''
+          sparksContext: '',
+          projectSummary: activeSettingsData.projectSummary || '',
+          issuesScratchpad: activeSettingsData.issuesScratchpad || []
         };
 
         const activeSparks = (currentSession?.sparks || []).filter((s: Spark) => s.status !== 'deployed');
@@ -1012,10 +1015,14 @@ export function NexusChat({ user, isSidebarOpen = true }: { user: User; isSideba
         if (currentCount > 0 && currentCount % 6 === 0) {
              const sessionObj = sessions.find((s: any) => s.id === targetSessionId);
              const currentSummary = sessionObj?.projectSummary || '';
+             const currentIssues = sessionObj?.issuesScratchpad || [];
              const contextMsg = [...messages.slice(-4).map((m: any) => `[${m.role}]: ${m.content}`), `[user]: ${userMessage}`, `[model]: ${fullResponse}`].join('\n');
-             compressChatHistory(currentSummary, contextMsg).then(newSummary => {
-                 if (newSummary) {
-                     updateDoc(doc(db, 'chatSessions', targetSessionId!), { projectSummary: newSummary }).catch(console.error);
+             compressChatHistory(currentSummary, currentIssues, contextMsg).then(result => {
+                 if (result) {
+                     updateDoc(doc(db, 'chatSessions', targetSessionId!), { 
+                         projectSummary: result.projectSummary,
+                         issuesScratchpad: result.issuesScratchpad
+                     }).catch(console.error);
                  }
              });
         }
@@ -1046,10 +1053,14 @@ export function NexusChat({ user, isSidebarOpen = true }: { user: User; isSideba
       if (currentCount > 0 && currentCount % 6 === 0) {
            const sessionObj = sessions.find((s: any) => s.id === targetSessionId);
            const currentSummary = sessionObj?.projectSummary || '';
+           const currentIssues = sessionObj?.issuesScratchpad || [];
            const contextMsg = [...messages.slice(-4).map((m: any) => `[${m.role}]: ${m.content}`), `[user]: ${userMessage}`, `[model]: ${fullResponse}`].join('\n');
-           compressChatHistory(currentSummary, contextMsg).then(newSummary => {
-               if (newSummary) {
-                   updateDoc(doc(db, 'chatSessions', targetSessionId!), { projectSummary: newSummary }).catch(console.error);
+           compressChatHistory(currentSummary, currentIssues, contextMsg).then(result => {
+               if (result) {
+                   updateDoc(doc(db, 'chatSessions', targetSessionId!), { 
+                       projectSummary: result.projectSummary,
+                       issuesScratchpad: result.issuesScratchpad
+                   }).catch(console.error);
                }
            });
       }
@@ -1359,6 +1370,7 @@ export function NexusChat({ user, isSidebarOpen = true }: { user: User; isSideba
                 </Button>
               </div>
             )}
+            <IssuesPanel issues={sessions.find(s => s.id === sessionId)?.issuesScratchpad || []} />
             <Sheet open={isSparksOpen} onOpenChange={setIsSparksOpen}>
               <SheetTrigger>
                 <div role="button" aria-label="Sparks" className="group relative w-10 h-10 inline-flex items-center justify-center text-muted-foreground hover:text-foreground">
