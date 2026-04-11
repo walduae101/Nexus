@@ -541,8 +541,8 @@ export function NexusChat({ user, isSidebarOpen = true }: { user: User; isSideba
     };
   }, [messages.length, messageLimit]);
 
-  const deleteMessageBranch = async (messageId: string) => {
-    if (!window.confirm("Are you sure you want to delete this message and all its replies?")) return;
+  const deleteMessageBranch = async (messageId: string, skipConfirm = false) => {
+    if (!skipConfirm && !window.confirm("Are you sure you want to delete this message and all its replies?")) return;
 
     const targetMsg = messages.find(m => m.id === messageId);
     if (!targetMsg) return;
@@ -583,12 +583,20 @@ export function NexusChat({ user, isSidebarOpen = true }: { user: User; isSideba
     }
   };
 
-  const sendMessage = async (overrideParentId?: string | null, overrideInput?: string) => {
+  const sendMessage = async (overrideParentId?: string | null, overrideInput?: string, regenerateUserId?: string | null) => {
     const isOverride = overrideInput !== undefined;
     let userMessage = isOverride ? overrideInput : input;
     let targetIdePayload = isOverride ? undefined : ideText;
     
-    if ((!userMessage.trim() && !targetIdePayload?.trim() && selectedFiles.length === 0) || isLoading) return;
+    if (regenerateUserId) {
+        const targetUserMsg = messages.find((m: any) => m.id === regenerateUserId);
+        if (targetUserMsg) {
+            userMessage = targetUserMsg.content || '';
+            targetIdePayload = targetUserMsg.idePayload || '';
+        }
+    }
+
+    if ((!userMessage.trim() && !targetIdePayload?.trim() && selectedFiles.length === 0 && !regenerateUserId) || isLoading) return;
     
     if (activeTool === 'image') userMessage = '/image ' + userMessage;
     else if (activeTool === 'search') userMessage = '/search ' + userMessage;
@@ -661,25 +669,35 @@ export function NexusChat({ user, isSidebarOpen = true }: { user: User; isSideba
          }
       }
 
-      // Save user message
-      const userDocRef = doc(collection(db, `chatSessions/${targetSessionId}/messages`));
-      
-      await setDoc(userDocRef, {
-        sessionId: targetSessionId,
-        userId: user.uid,
-        role: 'user',
-        content: userMessage || (currentSelectedFiles.length > 0 ? `[Uploaded ${currentSelectedFiles.length} file(s)]` : ''),
-        idePayload: targetIdePayload?.trim() || null,
-        timestamp: serverTimestamp(),
-        parentId: userParentId,
-        ...(uploadedUrls.length > 0 ? { attachments: uploadedUrls } : {})
-      });
-      
-      setActiveLeafId(userDocRef.id);
-      await updateDoc(doc(db, 'chatSessions', targetSessionId!), {
-         activeLeafId: userDocRef.id,
-         updatedAt: serverTimestamp()
-      });
+      let activeUserMsgId = '';
+      if (regenerateUserId) {
+          activeUserMsgId = regenerateUserId;
+          setActiveLeafId(activeUserMsgId);
+          await updateDoc(doc(db, 'chatSessions', targetSessionId!), {
+             activeLeafId: activeUserMsgId,
+             updatedAt: serverTimestamp()
+          });
+      } else {
+          const userDocRef = doc(collection(db, `chatSessions/${targetSessionId}/messages`));
+          activeUserMsgId = userDocRef.id;
+          
+          await setDoc(userDocRef, {
+            sessionId: targetSessionId,
+            userId: user.uid,
+            role: 'user',
+            content: userMessage || (currentSelectedFiles.length > 0 ? `[Uploaded ${currentSelectedFiles.length} file(s)]` : ''),
+            idePayload: targetIdePayload?.trim() || null,
+            timestamp: serverTimestamp(),
+            parentId: userParentId,
+            ...(uploadedUrls.length > 0 ? { attachments: uploadedUrls } : {})
+          });
+          
+          setActiveLeafId(activeUserMsgId);
+          await updateDoc(doc(db, 'chatSessions', targetSessionId!), {
+             activeLeafId: activeUserMsgId,
+             updatedAt: serverTimestamp()
+          });
+      }
       
       if (currentSelectedFiles.length > 0) {
          setMessages(prev => prev.filter(m => m.id !== tempUserMsgId));
@@ -741,7 +759,21 @@ export function NexusChat({ user, isSidebarOpen = true }: { user: User; isSideba
         }
       } else {
         // Standard Chat
-        const history = activeThread.map(m => ({
+        let currentThread = activeThread;
+        if (regenerateUserId) {
+            const thread = [];
+            const tMsg = messages.find((m: any) => m.id === regenerateUserId);
+            let currentId: string | null = tMsg ? tMsg.parentId : null;
+            while (currentId) {
+              const msg = messages.find((m: any) => m.id === currentId);
+              if (!msg) break;
+              thread.unshift(msg);
+              currentId = msg.parentId || null;
+            }
+            currentThread = thread;
+        }
+
+        const history = currentThread.map(m => ({
           role: m.role === 'model' ? 'model' : 'user',
           parts: [{ text: m.content }]
         })) as { role: 'user' | 'model', parts: { text: string }[] }[];
@@ -803,7 +835,7 @@ export function NexusChat({ user, isSidebarOpen = true }: { user: User; isSideba
         setProcessingAction(null); // Clear loading spinner instantly
         
         const aiMsgId = `temp-ai-${Date.now()}`;
-        setMessages(prev => [...prev, { id: aiMsgId, role: 'model', content: '', timestamp: null, parentId: userDocRef.id, isGenerating: true }]);
+        setMessages(prev => [...prev, { id: aiMsgId, role: 'model', content: '', timestamp: null, parentId: activeUserMsgId, isGenerating: true }]);
         setActiveLeafId(aiMsgId);
 
         let pendingBuffer = "";
@@ -849,7 +881,7 @@ export function NexusChat({ user, isSidebarOpen = true }: { user: User; isSideba
                     userId: user.uid,
                     role: 'system',
                     content: 'Network Interruption: The AI stream was unexpectedly disconnected. Partial response preserved.',
-                    parentId: userDocRef.id,
+                    parentId: activeUserMsgId,
                     timestamp: serverTimestamp()
                   });
                   setActiveLeafId(sysRef.id);
@@ -886,7 +918,7 @@ export function NexusChat({ user, isSidebarOpen = true }: { user: User; isSideba
           userId: user.uid,
           role: 'model',
           content: fullResponse,
-          parentId: userDocRef.id,
+          parentId: activeUserMsgId,
           timestamp: serverTimestamp()
         });
 
@@ -910,7 +942,7 @@ export function NexusChat({ user, isSidebarOpen = true }: { user: User; isSideba
         userId: user.uid,
         role: 'model',
         content: fullResponse,
-        parentId: userDocRef.id,
+        parentId: activeUserMsgId,
         timestamp: serverTimestamp(),
         ...(attachmentUrl ? { attachmentUrl, attachmentType } : {})
       });
@@ -942,6 +974,17 @@ export function NexusChat({ user, isSidebarOpen = true }: { user: User; isSideba
       setIsLoading(false);
       setProcessingAction(null);
     }
+  };
+
+  const handleRegenerate = async (messageId: string) => {
+    const aiMsg = messages.find((m: any) => m.id === messageId);
+    if (!aiMsg || aiMsg.role !== 'model') return;
+    
+    const userMsg = messages.find((m: any) => m.id === aiMsg.parentId);
+    if (!userMsg) return;
+    
+    await deleteMessageBranch(messageId, true);
+    await sendMessage(null, undefined, userMsg.id);
   };
 
   const handleSyncProject = async () => {
@@ -1530,6 +1573,7 @@ export function NexusChat({ user, isSidebarOpen = true }: { user: User; isSideba
             setActiveLeafId={setActiveLeafId}
             onEditSubmit={(content: string) => sendMessage(msg.parentId, content)}
             onDelete={deleteMessageBranch}
+            onRegenerate={handleRegenerate}
           />
         ))}
         {processingAction && <LoadingBubble action={processingAction} />}

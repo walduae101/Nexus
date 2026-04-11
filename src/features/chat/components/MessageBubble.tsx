@@ -2,13 +2,13 @@ import { useState, useEffect, useRef } from 'react';
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { ChevronUp, ChevronDown, ChevronLeft, ChevronRight, Download, Loader2, Mic, Pencil, Trash2, Terminal } from 'lucide-react';
+import { ChevronUp, ChevronDown, ChevronLeft, ChevronRight, Download, Loader2, Mic, Pencil, Trash2, Terminal, RotateCw } from 'lucide-react';
 import { motion } from 'motion/react';
 import Markdown from 'react-markdown';
 import TextareaAutosize from 'react-textarea-autosize';
 import { MessageCopyButton, ActionableCodeBlock } from './ChatUIPrimitives';
 
-export function MessageBubble({ msg, user, sessionId, sessions, globalDefaults, isArabic, t, messages, activeLeafId, setActiveLeafId, onEditSubmit, onDelete }: any) {
+export function MessageBubble({ msg, user, sessionId, sessions, globalDefaults, isArabic, t, messages, activeLeafId, setActiveLeafId, onEditSubmit, onDelete, onRegenerate }: any) {
   const [isEditing, setIsEditing] = useState(false);
   const [editText, setEditText] = useState(msg.content);
 
@@ -249,6 +249,15 @@ export function MessageBubble({ msg, user, sessionId, sessions, globalDefaults, 
                    <Trash2 className="w-3.5 h-3.5" />
                  </button>
                </>
+            )}
+            {msg.role === 'model' && onRegenerate && !msg.isGenerating && (
+               <button 
+                 onClick={(e) => { e.stopPropagation(); onRegenerate(msg.id); }}
+                 className="p-1.5 text-zinc-400 hover:text-zinc-200 bg-zinc-900/50 hover:bg-zinc-800 rounded-md transition-all duration-200"
+                 title={t('regenerate_message') || 'Regenerate'}
+               >
+                 <RotateCw className="w-3.5 h-3.5" />
+               </button>
             )}
             <MessageCopyButton text={content} />
           </div>
