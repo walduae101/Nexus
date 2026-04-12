@@ -1,4 +1,6 @@
 import { fastTask } from './gemini';
+import { doc, setDoc, serverTimestamp, collection, query, where, orderBy, limit, getDocs } from 'firebase/firestore';
+import { db } from './firebase';
 
 export interface Issue {
   id: string;
@@ -8,10 +10,11 @@ export interface Issue {
 }
 
 export async function compressChatHistory(
+  sessionId: string,
   currentSummary: string, 
   currentIssues: Issue[] | undefined,
   newMessages: string
-): Promise<{ projectSummary: string, issuesScratchpad: Issue[] } | null> {
+): Promise<void> {
   const issuesStr = JSON.stringify(currentIssues || []);
   const prompt = `You are an expert system architect and project manager tracking state in the background.
 
@@ -46,12 +49,62 @@ CRITICAL RULE: You MUST output ONLY valid JSON using this EXACT schema, with NO 
     // Strip possible code block formatting if hallucinated
     const cleanedJson = responseText.replace(/^```json\n?|```$/gm, '').trim();
     const result = JSON.parse(cleanedJson);
-    return {
+    await setDoc(doc(db, 'chatSessions', sessionId), {
       projectSummary: result.projectSummary || currentSummary,
-      issuesScratchpad: result.issuesScratchpad || currentIssues || []
-    };
-  } catch (err) {
+      issuesScratchpad: result.issuesScratchpad || currentIssues || [],
+      updatedAt: serverTimestamp()
+    }, { merge: true });
+    } catch (err) {
     console.error('Failed to compress chat history and issues', err);
-    return null;
   }
 }
+
+export async function getHistoricalContext(userId: string, excludeSessionId: string | null = null, daysWindow: number = 7): Promise<string> {
+  try {
+    const windowStartMs = Date.now() - (daysWindow * 24 * 60 * 60 * 1000);
+    
+    // Abstracted Historical Data Retrieval Engine
+    // Construct compound query targeting historical sessions
+    const sessionsQuery = query(
+      collection(db, 'chatSessions'),
+      where('userId', '==', userId),
+      orderBy('updatedAt', 'desc'),
+      limit(5)
+    );
+    
+    const sessionsSnapshot = await getDocs(sessionsQuery);
+    const recentSessions = sessionsSnapshot.docs
+      .map(d => ({ id: d.id, ...(d.data() as any) }))
+      .filter((s: any) => {
+        const t = s.updatedAt?.toMillis?.() || Date.now();
+        return t > windowStartMs && s.id !== excludeSessionId;
+      });
+
+    if (recentSessions.length === 0) return '';
+
+    let historyLog = '';
+    // Apply order: oldest of recent first or newest first? Let's do newest sessions first.
+    for (const s of recentSessions) {
+      const msgsQuery = query(
+        collection(db, `chatSessions/${s.id}/messages`),
+        orderBy('timestamp', 'desc'),
+        limit(15) // fetch trailing context
+      );
+      const mSnap = await getDocs(msgsQuery);
+      const msgs = mSnap.docs.map(d => d.data()).reverse(); // chronological
+      
+      if (msgs.length > 0) {
+        historyLog += `\n--- [SESSION: ${s.title || 'Untitled'}] ---\n`;
+        msgs.forEach(m => {
+          const roleLabel = m.role === 'model' ? 'Nexus' : 'User';
+          historyLog += `[${roleLabel}]: ${m.content}\n`;
+        });
+      }
+    }
+    return historyLog.trim();
+  } catch (error) {
+    console.error('Failed to retrieve historical context:', error);
+    return '';
+  }
+}
+

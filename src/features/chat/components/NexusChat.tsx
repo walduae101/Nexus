@@ -5,7 +5,7 @@ import { db, handleFirestoreError, OperationType, storage, auth } from '@/lib/fi
 import { signOut } from 'firebase/auth';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { chatWithNexus, generateImage, searchGrounding, textToSpeech, analyzeMedia, transcribeAudio, fastTask } from '@/lib/gemini';
-import { compressChatHistory } from '@/lib/memory';
+import { compressChatHistory, getHistoricalContext } from '@/lib/memory';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue, SelectGroup, SelectLabel, SelectSeparator } from '@/components/ui/select';
@@ -93,6 +93,7 @@ export function NexusChat({ user, isSidebarOpen = true, setIsSidebarOpen }: { us
   const [model, setModel] = useState<'gemini-3.1-pro-preview' | 'gemini-3-flash-preview' | 'gemini-3.1-flash-lite-preview'>('gemini-3.1-pro-preview');
   const [isLoading, setIsLoading] = useState(false);
   const [hasInitialized, setHasInitialized] = useState(false);
+  const [isForeshadowing, setIsForeshadowing] = useState(false);
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const scrollRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -592,6 +593,68 @@ export function NexusChat({ user, isSidebarOpen = true, setIsSidebarOpen }: { us
     scrollToMessage(searchMatches[prevIdx]);
   };
 
+  // Component Lifecycle Interception for Contextual Foreshadowing
+  useEffect(() => {
+    let active = true;
+
+    const checkForeshadowing = async () => {
+      // Trigger when we have no active session but the UI has fully initialized
+      if (hasInitialized && sessionId === null && !isForeshadowing) {
+        setIsForeshadowing(true);
+        try {
+          const history = await getHistoricalContext(user.uid, null, 7);
+          
+          const prompt = `[CONTEXTUAL FORESHADOWING DIRECTIVES]\nYou are Nexus, an elite AI developer and co-pilot.
+The user just opened a new terminal/chat session.
+Your task is to proactively initiate the conversation.
+1. Tone: Natural, empathetic, and highly professional.
+2. Continuity: Use the recent interaction history provided below to seamlessly pick up where you left off, reference ongoing tasks, or suggest logical next steps.
+3. Constraint: STRICTLY PROHIBIT generic initialization queries (e.g., "How are you?", "How can I help you today?"). Jump straight into relevant context or a smart technical prompt.
+4. Output: Generate ONLY the raw initiation string.
+
+[RECENT HISTORICAL DATA]\n` + (history ? history : 'No recent history. Assume fresh start.');
+
+          const initialString = await fastTask(prompt);
+          if (!active) return;
+
+          const newSessionRef = doc(collection(db, 'chatSessions'));
+          const targetSessionId = newSessionRef.id;
+          
+          await setDoc(newSessionRef, {
+            userId: user.uid,
+            title: t('new_chat') || 'New Chat',
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+            ...pendingSettings
+          });
+          
+          const sysRef = await addDoc(collection(db, `chatSessions/${targetSessionId}/messages`), {
+            sessionId: targetSessionId,
+            userId: user.uid,
+            role: 'model',
+            content: initialString,
+            timestamp: serverTimestamp()
+          });
+          
+          await updateDoc(doc(db, 'chatSessions', targetSessionId!), {
+             activeLeafId: sysRef.id,
+             updatedAt: serverTimestamp()
+          });
+          
+          setSessionId(targetSessionId);
+          setPendingSettings({});
+        } catch (err) {
+          console.error("Foreshadowing failed", err);
+        } finally {
+          if (active) setIsForeshadowing(false);
+        }
+      }
+    };
+
+    checkForeshadowing();
+    return () => { active = false; };
+  }, [hasInitialized, sessionId]);
+
   // Progressive Auto-Titling Engine
   useEffect(() => {
     const generateDynamicTitle = async () => {
@@ -702,6 +765,7 @@ export function NexusChat({ user, isSidebarOpen = true, setIsSidebarOpen }: { us
   };
 
   const sendMessage = async (overrideParentId?: string | null, overrideInput?: string, regenerateUserId?: string | null) => {
+    const MAX_FIRESTORE_CHARS = 800000; // ~800KB to leave room for metadata
     const isOverride = overrideInput !== undefined;
     let userMessage = isOverride ? overrideInput : input;
     let targetIdePayload = isOverride ? undefined : ideText;
@@ -799,12 +863,21 @@ export function NexusChat({ user, isSidebarOpen = true, setIsSidebarOpen }: { us
           const userDocRef = doc(collection(db, `chatSessions/${targetSessionId}/messages`));
           activeUserMsgId = userDocRef.id;
           
+          let safeUserContent = userMessage || (currentSelectedFiles.length > 0 ? `[Uploaded ${currentSelectedFiles.length} file(s)]` : '');
+          if (safeUserContent.length > MAX_FIRESTORE_CHARS) {
+              safeUserContent = safeUserContent.substring(0, MAX_FIRESTORE_CHARS) + '\n\n[SYSTEM WARNING: Input truncated. Exceeded 1MB database limit.]';
+          }
+          let safeIdePayload = targetIdePayload?.trim() || null;
+          if (safeIdePayload && safeIdePayload.length > MAX_FIRESTORE_CHARS) {
+              safeIdePayload = safeIdePayload.substring(0, MAX_FIRESTORE_CHARS) + '\n\n[SYSTEM WARNING: IDE Payload truncated. Exceeded 1MB database limit.]';
+          }
+
           await setDoc(userDocRef, {
             sessionId: targetSessionId,
             userId: user.uid,
             role: 'user',
-            content: userMessage || (currentSelectedFiles.length > 0 ? `[Uploaded ${currentSelectedFiles.length} file(s)]` : ''),
-            idePayload: targetIdePayload?.trim() || null,
+            content: safeUserContent,
+            idePayload: safeIdePayload,
             timestamp: serverTimestamp(),
             parentId: userParentId,
             ...(uploadedUrls.length > 0 ? { attachments: uploadedUrls } : {})
@@ -1034,13 +1107,17 @@ export function NexusChat({ user, isSidebarOpen = true, setIsSidebarOpen }: { us
         });
 
         const needsImmediateSync = fullResponse.includes('[SYNC_SCRATCHPAD]');
-        const cleanResponse = fullResponse.replace(/\[SYNC_SCRATCHPAD\]/g, '').trim();
+        let cleanResponse = fullResponse.replace(/\[SYNC_SCRATCHPAD\]/g, '').trim();
+        
+        if (cleanResponse.length > MAX_FIRESTORE_CHARS) {
+            cleanResponse = cleanResponse.substring(0, MAX_FIRESTORE_CHARS) + '\n\n[SYSTEM WARNING: AI Response truncated. Exceeded 1MB database limit.]';
+        }
 
         const aiDocRefResult = await addDoc(collection(db, `chatSessions/${targetSessionId}/messages`), {
           sessionId: targetSessionId,
           userId: user.uid,
           role: 'model',
-          content: cleanResponse,
+          content: cleanResponse || "",
           parentId: activeUserMsgId,
           timestamp: serverTimestamp()
         });
@@ -1069,14 +1146,7 @@ export function NexusChat({ user, isSidebarOpen = true, setIsSidebarOpen }: { us
                  contextMsg = [...messages.slice(-4).map((m: any) => `[${m.role}]: ${m.content}`), `[user]: ${userMessage}`, `[model]: ${cleanResponse}`].join('\n');
              }
              
-             compressChatHistory(currentSummary, currentIssues, contextMsg).then(result => {
-                 if (result) {
-                     updateDoc(doc(db, 'chatSessions', targetSessionId!), { 
-                         projectSummary: result.projectSummary,
-                         issuesScratchpad: result.issuesScratchpad
-                     }).catch(console.error);
-                 }
-             });
+             compressChatHistory(targetSessionId!, currentSummary, currentIssues, contextMsg);
         }
         
         setIsLoading(false);
@@ -1084,14 +1154,18 @@ export function NexusChat({ user, isSidebarOpen = true, setIsSidebarOpen }: { us
       }
 
       const needsImmediateSync = fullResponse.includes('[SYNC_SCRATCHPAD]');
-      const cleanResponse = fullResponse.replace(/\[SYNC_SCRATCHPAD\]/g, '').trim();
+      let cleanResponse = fullResponse.replace(/\[SYNC_SCRATCHPAD\]/g, '').trim();
+
+      if (cleanResponse.length > MAX_FIRESTORE_CHARS) {
+          cleanResponse = cleanResponse.substring(0, MAX_FIRESTORE_CHARS) + '\n\n[SYSTEM WARNING: AI Response truncated. Exceeded 1MB database limit.]';
+      }
 
       // Save non-streamed response (slash commands, file analysis)
       const aiNonStreamRef = await addDoc(collection(db, `chatSessions/${targetSessionId}/messages`), {
         sessionId: targetSessionId,
         userId: user.uid,
         role: 'model',
-        content: cleanResponse,
+        content: cleanResponse || "",
         parentId: activeUserMsgId,
         timestamp: serverTimestamp(),
         ...(attachmentUrl ? { attachmentUrl, attachmentType } : {})
@@ -1118,14 +1192,7 @@ export function NexusChat({ user, isSidebarOpen = true, setIsSidebarOpen }: { us
                contextMsg = [...messages.slice(-4).map((m: any) => `[${m.role}]: ${m.content}`), `[user]: ${userMessage}`, `[model]: ${cleanResponse}`].join('\n');
            }
 
-           compressChatHistory(currentSummary, currentIssues, contextMsg).then(result => {
-               if (result) {
-                   updateDoc(doc(db, 'chatSessions', targetSessionId!), { 
-                       projectSummary: result.projectSummary,
-                       issuesScratchpad: result.issuesScratchpad
-                   }).catch(console.error);
-               }
-           });
+           compressChatHistory(targetSessionId!, currentSummary, currentIssues, contextMsg);
       }
 
     } catch (error) {
@@ -2012,9 +2079,9 @@ export function NexusChat({ user, isSidebarOpen = true, setIsSidebarOpen }: { us
                   }
                 }
               }}
-              placeholder={activeTool === 'image' ? 'Describe the image...' : activeTool === 'search' ? 'What do you want to search?' : activeTool === 'tts' ? 'What should I say?' : (activeTab === 'ide' ? (t('ide_payload') || 'Paste IDE Context/Code...') : t('ask_nexus'))} 
-              className={`bg-transparent border-none text-foreground flex-1 shadow-none w-full resize-none break-words whitespace-pre-wrap overflow-x-hidden overflow-y-auto py-2 text-start [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none] focus:outline-none focus:ring-0 focus-visible:ring-0 focus-visible:ring-offset-0 focus-visible:outline-none ${activeTab === 'ide' ? 'font-mono text-zinc-300 text-[0.8rem]' : ''}`}
-              disabled={isLoading}
+              placeholder={isForeshadowing ? t('initializing') || 'Nexus is connecting...' : activeTool === 'image' ? 'Describe the image...' : activeTool === 'search' ? 'What do you want to search?' : activeTool === 'tts' ? 'What should I say?' : (activeTab === 'ide' ? (t('ide_payload') || 'Paste IDE Context/Code...') : t('ask_nexus'))} 
+              className={`bg-transparent border-none text-foreground flex-1 shadow-none w-full resize-none break-words whitespace-pre-wrap overflow-x-hidden overflow-y-auto py-2 text-start [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none] focus:outline-none focus:ring-0 focus-visible:ring-0 focus-visible:ring-offset-0 focus-visible:outline-none ${activeTab === 'ide' ? 'font-mono text-zinc-300 text-[0.8rem]' : ''} ${isForeshadowing ? 'opacity-50 cursor-not-allowed' : ''}`}
+              disabled={isLoading || isForeshadowing}
               minRows={1}
               maxRows={8}
             />
@@ -2023,7 +2090,7 @@ export function NexusChat({ user, isSidebarOpen = true, setIsSidebarOpen }: { us
                 <Square className="w-4 h-4 fill-current transition-transform group-hover:scale-90" />
               </Button>
             ) : (
-              <Button type="submit" disabled={isLoading || (!input.trim() && !ideText.trim() && selectedFiles.length === 0)} className="bg-primary hover:bg-primary/90 text-primary-foreground shrink-0 rounded-xl hover:opacity-80 transition-opacity">
+              <Button type="submit" disabled={isLoading || isForeshadowing || (!input.trim() && !ideText.trim() && selectedFiles.length === 0)} className="bg-primary hover:bg-primary/90 text-primary-foreground shrink-0 rounded-xl hover:opacity-80 transition-opacity">
                 <Send className="w-4 h-4" />
               </Button>
             )}
