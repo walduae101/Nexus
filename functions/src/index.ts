@@ -128,6 +128,34 @@ ${transcript}
             const existingSnap = await memRef.get();
             let finalData = existingData(existingSnap.data(), distilledData);
             
+            // Adaptive Persona Dynamics - Closeness Meter Accumulation
+            let xpGained = 0;
+            const hasData = (str: any) => typeof str === 'string' && str.length > 5 && !str.toLowerCase().includes("no new");
+            if (hasData(distilledData.vulnerabilities_fears)) xpGained += 50;
+            if (hasData(distilledData.humorous_shared_jokes)) xpGained += 25;
+            if (hasData(distilledData.personal_goals_promises)) xpGained += 25;
+
+            if (xpGained > 0) {
+                const personaRef = db.doc(`users/${userId}/persona_metrics/state`);
+                await db.runTransaction(async (t_persona) => {
+                    const snap = await t_persona.get(personaRef);
+                    let currentXp = 0;
+                    if (snap.exists) {
+                        currentXp = snap.data()?.intimacy_xp || 0;
+                    }
+                    const newXp = currentXp + xpGained;
+                    // Level increments every 100 XP, max 5.
+                    const newLevel = Math.min(5, Math.floor(newXp / 100) + 1);
+                    
+                    t_persona.set(personaRef, {
+                        intimacy_xp: newXp,
+                        closeness_level: newLevel,
+                        updatedAt: admin.firestore.FieldValue.serverTimestamp()
+                    }, { merge: true });
+                });
+                console.log(`Earned +${xpGained} XP for user ${userId}.`);
+            }
+
             await memRef.set({
                 ...finalData,
                 updatedAt: admin.firestore.FieldValue.serverTimestamp()

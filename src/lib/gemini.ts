@@ -256,11 +256,21 @@ export async function searchGrounding(query: string) {
   return response.text;
 }
 
-export async function textToSpeech(text: string) {
+export async function textToSpeech(text: string, closenessLevel: number = 1) {
+  let sysInstruction = "You are an advanced Text-to-Speech synthesizer. Synthesize the text naturally.";
+  if (closenessLevel >= 4) {
+      sysInstruction += " CRITICAL PROSODY INSTRUCTION: Apply a warm, slightly lower baseline pitch. Introduce minor, spontaneous fluctuations in delivery speed to mimic human conversational rhythm, and relax strict punctuation pauses.";
+  } else if (closenessLevel >= 2) {
+      sysInstruction += " CRITICAL PROSODY INSTRUCTION: Use a friendly, engaging delivery rate.";
+  } else {
+      sysInstruction += " CRITICAL PROSODY INSTRUCTION: Execute with a standard baseline pitch and a highly uniform, rigid delivery rate.";
+  }
+
   const response = await ai.models.generateContent({
     model: 'gemini-2.5-pro-preview-tts',
     contents: [{ parts: [{ text }] }],
     config: {
+      systemInstruction: sysInstruction,
       responseModalities: [Modality.AUDIO],
       speechConfig: {
         voiceConfig: {
