@@ -108,3 +108,21 @@ export async function getHistoricalContext(userId: string, excludeSessionId: str
   }
 }
 
+export async function getDistilledMemories(userId: string): Promise<any> {
+  const emptyPrimitive = {
+    vulnerabilities_fears: '',
+    humorous_shared_jokes: '',
+    personal_goals_promises: ''
+  };
+  try {
+    const q = query(collection(db, `users/${userId}/distilled_emotional_memories`), limit(1));
+    const snapshot = await getDocs(q);
+    if (!snapshot.empty) {
+      return snapshot.docs[0].data();
+    }
+    return emptyPrimitive;
+  } catch (error) {
+    console.error('Failed to retrieve distilled memories, using optimistic fallback:', error);
+    return emptyPrimitive;
+  }
+}

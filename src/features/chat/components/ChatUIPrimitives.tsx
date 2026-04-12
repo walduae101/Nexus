@@ -112,9 +112,9 @@ export function RelativeTime({ date, lang, fallback }: { date: Date | null, lang
   return <>{getRelativeTime(date, lang)}</>;
 }
 
-export function LoadingBubble({ action }: { action: 'text' | 'image' | 'tts' | 'search' }) {
+export function LoadingBubble({ action }: { action: 'text' | 'image' | 'tts' | 'search' | 'distilling' }) {
   const { t } = useTranslation();
-  const text = action === 'text' ? t('loading_text') : action === 'tts' ? t('loading_tts') : action === 'image' ? t('loading_image') : t('loading_search');
+  const text = action === 'text' ? t('loading_text') : action === 'tts' ? t('loading_tts') : action === 'image' ? t('loading_image') : action === 'search' ? t('loading_search') : (t('loading_distilling') || 'Distilling contextual memories...');
   return (
     <div className="flex gap-4 p-4 md:p-6 w-full text-foreground border-b border-border">
       <Avatar className="w-8 h-8 rounded-lg shrink-0 outline outline-1 outline-border shadow-sm">

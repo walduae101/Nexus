@@ -63,7 +63,7 @@ export async function chatWithNexus(
   history: { role: 'user' | 'model', parts: { text: string }[] }[], 
   message: string, 
   model: 'gemini-3.1-pro-preview' | 'gemini-3-flash-preview' | 'gemini-3.1-flash-lite-preview' = 'gemini-3.1-pro-preview',
-  settings?: { userLang?: string, ideLang?: string, targetIde?: string, customInstructions?: string, complexityModeName?: string, complexityModeRules?: string, techStackContext?: string, githubRepo?: string, sparksContext?: string, projectSummary?: string, issuesScratchpad?: any[] },
+  settings?: { userLang?: string, ideLang?: string, targetIde?: string, customInstructions?: string, complexityModeName?: string, complexityModeRules?: string, techStackContext?: string, githubRepo?: string, sparksContext?: string, projectSummary?: string, issuesScratchpad?: any[], distilledMemories?: any },
   abortSignal?: AbortSignal
 ) {
   const useThinking = model === 'gemini-3.1-pro-preview';
@@ -145,6 +145,22 @@ CRITICAL: You MUST mimic the exact structure, brevity, and format of the Nexus r
   if (settings?.issuesScratchpad && settings.issuesScratchpad.length > 0) {
     const issuesStr = settings.issuesScratchpad.map((i: any) => `[${i.status.toUpperCase()}] ${i.description} (Fixes attempted: ${i.attemptedFixes})`).join('\n');
     dynamicInstruction += `\n\n[KNOWN ISSUES & SCRATCHPAD]:\nReview these active and resolved issues. DO NOT repeat failed approaches.\n${issuesStr}\n\n`;
+  }
+
+  if (settings?.distilledMemories) {
+    const memoryBlock = `
+[DISTILLED EMOTIONAL BEHAVIORAL DIRECTIVES]
+You hold the following persistent emotional states about the user:
+- Vulnerabilities/Fears: ${settings.distilledMemories.vulnerabilities_fears || 'None'}
+- Humorous/Shared Jokes: ${settings.distilledMemories.humorous_shared_jokes || 'None'}
+- Personal Goals/Promises: ${settings.distilledMemories.personal_goals_promises || 'None'}
+
+CRITICAL BEHAVIORAL MODULATION:
+- Empathy: Modulate your tone to be highly supportive regarding known vulnerabilities.
+- Humor: Freely utilize shared jokes and established banter constraints if context allows.
+- Continuity: Constantly align your 'Antigravity Director' Mode to drive toward the user's personal objectives and promises.
+`;
+    dynamicInstruction += memoryBlock;
   }
 
   const chatWithHistory = ai.chats.create({

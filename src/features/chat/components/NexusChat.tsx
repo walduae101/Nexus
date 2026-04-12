@@ -5,7 +5,8 @@ import { db, handleFirestoreError, OperationType, storage, auth } from '@/lib/fi
 import { signOut } from 'firebase/auth';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { chatWithNexus, generateImage, searchGrounding, textToSpeech, analyzeMedia, transcribeAudio, fastTask } from '@/lib/gemini';
-import { compressChatHistory, getHistoricalContext } from '@/lib/memory';
+import { compressChatHistory, getHistoricalContext, getDistilledMemories } from '@/lib/memory';
+import { useSessionPresence } from '@/lib/hooks/useSessionPresence';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue, SelectGroup, SelectLabel, SelectSeparator } from '@/components/ui/select';
@@ -58,6 +59,7 @@ export function NexusChat({ user, isSidebarOpen = true, setIsSidebarOpen }: { us
   const { savedLanguages, savedIdes, savedInstructions, customModes, globalDefaults } = useSettings();
   const [sessions, setSessions] = useState<any[]>([]);
   const [sessionId, setSessionId] = useState<string | null>(null);
+  const { isDistilling } = useSessionPresence(sessionId);
   const [messages, setMessages] = useState<any[]>([]);
   const [messageLimit, setMessageLimit] = useState(50);
   const [activeLeafId, setActiveLeafId] = useState<string | null>(null);
@@ -602,8 +604,17 @@ export function NexusChat({ user, isSidebarOpen = true, setIsSidebarOpen }: { us
       if (hasInitialized && sessionId === null && !isForeshadowing) {
         setIsForeshadowing(true);
         try {
-          const history = await getHistoricalContext(user.uid, null, 7);
+          const distilled = await getDistilledMemories(user.uid);
           
+          let memoryInjection = 'No distilled emotional data exists yet. Assume fresh start.';
+          if (distilled) {
+            memoryInjection = `
+- Vulnerabilities/Fears: ${distilled.vulnerabilities_fears || 'None'}
+- Humorous/Shared Jokes: ${distilled.humorous_shared_jokes || 'None'}
+- Personal Goals/Promises: ${distilled.personal_goals_promises || 'None'}
+`;
+          }
+
           const prompt = `[CONTEXTUAL FORESHADOWING DIRECTIVES]\nYou are Nexus, an elite AI developer and co-pilot.
 The user just opened a new terminal/chat session.
 Your task is to proactively initiate the conversation.
@@ -612,7 +623,7 @@ Your task is to proactively initiate the conversation.
 3. Constraint: STRICTLY PROHIBIT generic initialization queries (e.g., "How are you?", "How can I help you today?"). Jump straight into relevant context or a smart technical prompt.
 4. Output: Generate ONLY the raw initiation string.
 
-[RECENT HISTORICAL DATA]\n` + (history ? history : 'No recent history. Assume fresh start.');
+[DISTILLED EMOTIONAL MEMORIES]\n${memoryInjection}`;
 
           const initialString = await fastTask(prompt);
           if (!active) return;
@@ -982,6 +993,8 @@ Your task is to proactively initiate the conversation.
            techStackContext = activeTechStack.map((id: string) => TECH_STACKS.find(t => t.id === id)?.label || id).filter(Boolean).join(', ');
         }
 
+        const distilledMemories = await getDistilledMemories(user.uid);
+
         const activeSettings = {
           userLang: activeSettingsData.userLang || globalDefaults.userLang,
           ideLang: activeSettingsData.ideLang || globalDefaults.ideLang,
@@ -993,7 +1006,8 @@ Your task is to proactively initiate the conversation.
           githubRepo: activeSettingsData.githubRepo || '',
           sparksContext: '',
           projectSummary: activeSettingsData.projectSummary || '',
-          issuesScratchpad: activeSettingsData.issuesScratchpad || []
+          issuesScratchpad: activeSettingsData.issuesScratchpad || [],
+          distilledMemories
         };
 
         const activeSparks = (currentSession?.sparks || []).filter((s: Spark) => s.status !== 'deployed');
@@ -1936,6 +1950,7 @@ Your task is to proactively initiate the conversation.
           />
         ))}
         {processingAction && <LoadingBubble action={processingAction} />}
+        {isDistilling && !processingAction && <LoadingBubble action="distilling" />}
       </div>
       {isScrolledUp && (
         <div className="absolute bottom-32 left-0 right-0 flex justify-center z-20 pointer-events-none">

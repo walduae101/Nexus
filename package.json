@@ -8,7 +8,8 @@
     "build": "vite build",
     "preview": "vite preview",
     "clean": "rm -rf dist",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "emulators": "firebase emulators:start --import=./.firebase/emulator-data --export-on-exit=./.firebase/emulator-data"
   },
   "dependencies": {
     "@base-ui/react": "^1.3.0",

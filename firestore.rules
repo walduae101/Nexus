@@ -162,6 +162,10 @@ service cloud.firestore {
         allow read, delete: if isOwner(userId);
         allow create, update: if isOwner(userId) && request.resource.data.keys().hasAll(['payload', 'targetIde', 'status', 'timestamp']) && request.resource.data.payload is string && request.resource.data.targetIde is string && request.resource.data.status is string;
       }
+      match /distilled_emotional_memories/{docId} {
+        allow read, delete: if isOwner(userId);
+        allow create, update: if isOwner(userId) || isAdmin();
+      }
     }
 
     match /chatSessions/{sessionId} {
@@ -184,6 +188,11 @@ service cloud.firestore {
         allow update: if isAuthenticated() && isOwner(resource.data.userId) && isValidChatMessage(request.resource.data) &&
                       areImmutableFieldsUnchanged(['sessionId', 'userId', 'role', 'timestamp']);
         allow delete: if isAuthenticated() && isOwner(resource.data.userId);
+      }
+
+      match /presence/{docId} {
+        allow read: if isAuthenticated() && isOwner(get(/databases/$(database)/documents/chatSessions/$(sessionId)).data.userId);
+        allow write: if isAuthenticated() && isOwner(get(/databases/$(database)/documents/chatSessions/$(sessionId)).data.userId);
       }
     }
 
