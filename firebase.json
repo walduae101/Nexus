@@ -6,7 +6,8 @@
     "rules": "storage.rules"
   },
   "firestore": {
-    "rules": "firestore.rules"
+    "rules": "firestore.rules",
+    "database": "ai-studio-989015a9-9f67-4a0c-a98f-26ec377ef430"
   },
   "hosting": {
     "site": "nexus-coolwtf",

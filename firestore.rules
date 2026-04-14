@@ -2,6 +2,9 @@ rules_version = '2';
 
 service cloud.firestore {
   match /databases/{database}/documents {
+    match /{document=**} {
+      allow read, write: if false;
+    }
     
     // ===============================================================
     // Assumed Data Model
@@ -138,6 +141,11 @@ service cloud.firestore {
                     ((request.resource.data.role == resource.data.role) || isAdmin());
       allow delete: if isAdmin();
 
+      match /characters/{docId} {
+        allow read: if isAuthenticated();
+        allow write: if false;
+      }
+
       match /saved_languages/{docId} {
         allow read, delete: if isOwner(userId);
         allow create, update: if isOwner(userId) && request.resource.data.keys().hasAll(['name', 'value']) && request.resource.data.name is string && request.resource.data.value is string;
@@ -163,9 +171,50 @@ service cloud.firestore {
         allow create, update: if isOwner(userId) && request.resource.data.keys().hasAll(['payload', 'targetIde', 'status', 'timestamp']) && request.resource.data.payload is string && request.resource.data.targetIde is string && request.resource.data.status is string;
       }
       match /distilled_emotional_memories/{docId} {
-        allow read, delete: if isOwner(userId);
-        allow create, update: if isOwner(userId) || isAdmin();
+        allow read, write: if isOwner(userId);
       }
+      match /presence/{docId} {
+        allow read: if isOwner(userId);
+        allow write: if isOwner(userId) && request.resource.data.keys().hasAny(['is_surprised', 'is_distilling', 'last_active_ping', 'updatedAt']);
+      }
+      match /persona_metrics/{docId} {
+        allow read: if isOwner(userId);
+        allow write: if isOwner(userId) && request.resource.data.keys().hasAny(['last_recall_timestamp', 'updatedAt']);
+      }
+
+      match /{document=**} {
+        allow read, write: if request.auth != null && request.auth.uid == userId;
+      }
+    }
+
+    match /characters/{characterId} {
+      allow read, update, delete: if isAuthenticated() && resource.data.userId == request.auth.uid;
+      allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
+    }
+
+    match /memories/{docId} {
+      allow read, update, delete: if isAuthenticated() && resource.data.userId == request.auth.uid;
+      allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
+    }
+
+    match /presence/{docId} {
+      allow read, update, delete: if isAuthenticated() && resource.data.userId == request.auth.uid;
+      allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
+    }
+
+    match /persona_metrics/{docId} {
+      allow read, update, delete: if isAuthenticated() && resource.data.userId == request.auth.uid;
+      allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
+    }
+
+    match /distilled_emotional_memories/{docId} {
+      allow read, update, delete: if isAuthenticated() && resource.data.userId == request.auth.uid;
+      allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
+    }
+
+    match /{path=**}/distilled_emotional_memories/{docId} {
+      allow read, update, delete: if isAuthenticated() && resource.data.userId == request.auth.uid;
+      allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
     }
 
     match /chatSessions/{sessionId} {
@@ -190,10 +239,7 @@ service cloud.firestore {
         allow delete: if isAuthenticated() && isOwner(resource.data.userId);
       }
 
-      match /presence/{docId} {
-        allow read: if isAuthenticated() && isOwner(get(/databases/$(database)/documents/chatSessions/$(sessionId)).data.userId);
-        allow write: if isAuthenticated() && isOwner(get(/databases/$(database)/documents/chatSessions/$(sessionId)).data.userId);
-      }
+
     }
 
     match /generatedAssets/{assetId} {

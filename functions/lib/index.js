@@ -34,7 +34,7 @@ var __importStar = (this && this.__importStar) || (function () {
 })();
 var _a;
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.onMessageCreated = void 0;
+exports.sweepOrphans = exports.onMessageCreated = void 0;
 const functions = __importStar(require("firebase-functions"));
 const admin = __importStar(require("firebase-admin"));
 const genai_1 = require("@google/genai");
@@ -98,13 +98,13 @@ Categorize them strictly under:
 2. "humorous_shared_jokes" (Inside jokes, sarcasm, or ongoing banter)
 3. "personal_goals_promises" (User's stated ambitions, or promises made between the AI and the user)
 
-If nothing new fits a category based on the recent text, you can note "No new data". We will merge this logically. Wait, to make it completely stateful, output an updated JSON. Let's just output the exact JSON structure for the newly observed items.
+If nothing new fits a category based on the recent text, you can set the content to "".
 
-CRITICAL: Return ONLY valid JSON with this exact schema (no markdown formatting, no comments, no \`\`\` text):
+CRITICAL: Return ONLY valid JSON with this exact schema evaluating 'is_positive_highlight' explicitly if the memory denotes a positive peak, shared optimism, or significant milestone.
 {
-  "vulnerabilities_fears": "...",
-  "humorous_shared_jokes": "...",
-  "personal_goals_promises": "..."
+  "vulnerabilities_fears": { "content": "...", "is_positive_highlight": false },
+  "humorous_shared_jokes": { "content": "...", "is_positive_highlight": true },
+  "personal_goals_promises": { "content": "...", "is_positive_highlight": true }
 }
 
 Transcript:
@@ -112,7 +112,7 @@ Transcript:
 ${transcript}
 """
 `;
-            const presenceRef = db.doc(`chatSessions/${sessionId}/presence/state`);
+            const presenceRef = db.doc(`users/${userId}/presence/state`);
             await presenceRef.set({ is_distilling: true, updatedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
             try {
                 const startTime = perf_hooks_1.performance.now();
@@ -144,19 +144,14 @@ ${transcript}
                     console.error("Failed to parse LLM JSON:", cleanedJson);
                     return;
                 }
-                // Fetch current distilled memory to merge it intelligently? 
-                // For now, simpler: we replace or append? The user asked to "persist the resulting structured emotional payload". Let's do a merge over time or just store the latest.
-                const memRef = db.collection(`users/${userId}/distilled_emotional_memories`).doc("latest");
-                const existingSnap = await memRef.get();
-                let finalData = existingData(existingSnap.data(), distilledData);
                 // Adaptive Persona Dynamics - Closeness Meter Accumulation
                 let xpGained = 0;
-                const hasData = (str) => typeof str === 'string' && str.length > 5 && !str.toLowerCase().includes("no new");
-                if (hasData(distilledData.vulnerabilities_fears))
+                const isMeaningful = (obj) => obj && typeof obj.content === 'string' && obj.content.length > 5 && !obj.content.toLowerCase().includes("no new");
+                if (isMeaningful(distilledData.vulnerabilities_fears))
                     xpGained += 50;
-                if (hasData(distilledData.humorous_shared_jokes))
+                if (isMeaningful(distilledData.humorous_shared_jokes))
                     xpGained += 25;
-                if (hasData(distilledData.personal_goals_promises))
+                if (isMeaningful(distilledData.personal_goals_promises))
                     xpGained += 25;
                 if (xpGained > 0) {
                     const personaRef = db.doc(`users/${userId}/persona_metrics/state`);
@@ -168,17 +163,40 @@ ${transcript}
                             currentXp = ((_a = snap.data()) === null || _a === void 0 ? void 0 : _a.intimacy_xp) || 0;
                         }
                         const newXp = currentXp + xpGained;
-                        // Level increments every 100 XP, max 5.
                         const newLevel = Math.min(5, Math.floor(newXp / 100) + 1);
                         t_persona.set(personaRef, {
-                            intimacy_xp: newXp,
+                            intimacy_xp: admin.firestore.FieldValue.increment(xpGained),
                             closeness_level: newLevel,
                             updatedAt: admin.firestore.FieldValue.serverTimestamp()
                         }, { merge: true });
                     });
                     console.log(`Earned +${xpGained} XP for user ${userId}.`);
                 }
+                // We continue saving to "latest" to respect ambient UI backward compatibility,
+                // but we will also persist discrete snapshot documents for positive queries!
+                const ambientPayload = {
+                    vulnerabilities_fears: isMeaningful(distilledData.vulnerabilities_fears) ? distilledData.vulnerabilities_fears.content : "",
+                    humorous_shared_jokes: isMeaningful(distilledData.humorous_shared_jokes) ? distilledData.humorous_shared_jokes.content : "",
+                    personal_goals_promises: isMeaningful(distilledData.personal_goals_promises) ? distilledData.personal_goals_promises.content : ""
+                };
+                const memRef = db.collection(`users/${userId}/distilled_emotional_memories`).doc("latest");
+                const existingSnap = await memRef.get();
+                let finalData = existingData(existingSnap.data(), ambientPayload);
                 await memRef.set(Object.assign(Object.assign({}, finalData), { updatedAt: admin.firestore.FieldValue.serverTimestamp() }), { merge: true });
+                // Push positive highlights dynamically into discrete records
+                const pushHighlights = async (keyPath, memObj) => {
+                    if (isMeaningful(memObj) && memObj.is_positive_highlight) {
+                        await db.collection(`users/${userId}/distilled_emotional_memories`).add({
+                            type: keyPath,
+                            content: memObj.content,
+                            is_positive_highlight: true,
+                            timestamp: admin.firestore.FieldValue.serverTimestamp()
+                        });
+                    }
+                };
+                await pushHighlights('vulnerabilities_fears', distilledData.vulnerabilities_fears);
+                await pushHighlights('humorous_shared_jokes', distilledData.humorous_shared_jokes);
+                await pushHighlights('personal_goals_promises', distilledData.personal_goals_promises);
                 console.log(`Successfully updated emotional memories for user ${userId}`);
             }
             finally {
@@ -201,4 +219,35 @@ function existingData(oldData, newData) {
         personal_goals_promises: isMeaningful(newData.personal_goals_promises) ? newData.personal_goals_promises : oldData.personal_goals_promises || ""
     };
 }
+exports.sweepOrphans = functions.https.onCall(async (data, context) => {
+    if (!context.auth) {
+        throw new functions.https.HttpsError("unauthenticated", "Must be logged in.");
+    }
+    const userId = context.auth.uid;
+    const presenceRef = db.doc(`users/${userId}/presence/state`);
+    try {
+        const snap = await presenceRef.get();
+        if (snap.exists) {
+            const pData = snap.data();
+            if (pData === null || pData === void 0 ? void 0 : pData.last_active_ping) {
+                // Determine Delta
+                const lastPing = pData.last_active_ping.toMillis ? pData.last_active_ping.toMillis() : Date.now();
+                if (Date.now() - lastPing > 15000) {
+                    console.log(`[SWEEP] Orphan presence ghost detected for ${userId}. Forcing wipe.`);
+                    await presenceRef.set({
+                        is_distilling: false,
+                        is_surprised: false,
+                        updatedAt: admin.firestore.FieldValue.serverTimestamp()
+                    }, { merge: true });
+                    return { success: true, swept: true };
+                }
+            }
+        }
+        return { success: true, swept: false };
+    }
+    catch (e) {
+        console.error("Orphan sweep failed", e);
+        throw new functions.https.HttpsError("internal", "Sweep architecture dropped connection");
+    }
+});
 //# sourceMappingURL=index.js.map
