@@ -94,17 +94,11 @@ service cloud.firestore {
              data.createdAt is timestamp;
     }
 
-    function isValidChatSession(data) {
-      return request.resource.data.keys().hasAll(['userId', 'title', 'createdAt', 'updatedAt']) &&
-             data.userId is string && data.userId.size() > 0 && data.userId.size() < 100 &&
-             data.title is string && data.title.size() > 0 && data.title.size() < 200 &&
-             data.createdAt is timestamp &&
-             data.updatedAt is timestamp &&
-             (!('userLang' in data) || data.userLang == null || data.userLang is string) &&
-             (!('ideLang' in data) || data.ideLang == null || data.ideLang is string) &&
-             (!('targetIde' in data) || data.targetIde == null || data.targetIde is string) &&
-             (!('customInstructions' in data) || data.customInstructions == null || data.customInstructions is string) &&
-             (!('complexityMode' in data) || data.complexityMode == null || data.complexityMode is string);
+    function isValidSession(data) {
+      return request.resource.data.keys().hasAll(['id', 'userId', 'characterId', 'startTime']) &&
+             data.id is string && data.userId is string && data.characterId is string &&
+             data.startTime is timestamp &&
+             (!('endTime' in data) || data.endTime is timestamp);
     }
 
     function isValidChatMessage(data) {
@@ -217,28 +211,31 @@ service cloud.firestore {
       allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
     }
 
-    match /chatSessions/{sessionId} {
+    match /sessions/{sessionId} {
       allow read: if isAuthenticated() && isOwner(resource.data.userId);
-      allow create: if isAuthenticated() && isValidChatSession(request.resource.data) &&
+      allow create: if isAuthenticated() && isValidSession(request.resource.data) &&
                     isOwner(request.resource.data.userId);
-      allow update: if isAuthenticated() && isOwner(resource.data.userId) && isValidChatSession(request.resource.data) &&
-                    areImmutableFieldsUnchanged(['userId', 'createdAt']);
+      allow update: if isAuthenticated() && isOwner(resource.data.userId) && isValidSession(request.resource.data) &&
+                    areImmutableFieldsUnchanged(['userId', 'startTime', 'id', 'characterId']);
       allow delete: if isAuthenticated() && isOwner(resource.data.userId);
 
       match /messages/{messageId} {
         allow read: if isAuthenticated() && (
-                      !exists(/databases/$(database)/documents/chatSessions/$(sessionId)) ||
-                      isOwner(get(/databases/$(database)/documents/chatSessions/$(sessionId)).data.userId)
+                      !exists(/databases/$(database)/documents/sessions/$(sessionId)) ||
+                      isOwner(get(/databases/$(database)/documents/sessions/$(sessionId)).data.userId)
                     );
         allow create: if isAuthenticated() && isValidChatMessage(request.resource.data) &&
                       isOwner(request.resource.data.userId) &&
-                      request.resource.data.sessionId == sessionId &&
-                      isOwner(get(/databases/$(database)/documents/chatSessions/$(sessionId)).data.userId);
+                      isOwner(get(/databases/$(database)/documents/sessions/$(sessionId)).data.userId);
         allow update: if isAuthenticated() && isOwner(resource.data.userId) && isValidChatMessage(request.resource.data) &&
                       areImmutableFieldsUnchanged(['sessionId', 'userId', 'role', 'timestamp']);
         allow delete: if isAuthenticated() && isOwner(resource.data.userId);
       }
 
+      match /presence/{docId} {
+        allow read, write: if isAuthenticated() &&
+                           isOwner(get(/databases/$(database)/documents/sessions/$(sessionId)).data.userId);
+      }
 
     }
 
