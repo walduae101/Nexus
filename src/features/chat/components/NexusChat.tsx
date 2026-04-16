@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo, lazy, Suspense, startTransition } from 'react';
+import { useState, useEffect, useRef, useMemo, lazy, Suspense, startTransition, Fragment } from 'react';
 import { User } from 'firebase/auth';
 import { collection, query, orderBy, onSnapshot, addDoc,  doc, setDoc, where, updateDoc, deleteDoc, getDocs, limit , Timestamp } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType, storage, auth } from '@/lib/firebase';
@@ -772,6 +772,32 @@ COMPRESSED OUTPUT:`;
     return () => unsubscribe();
   }, [sessionId, messageLimit, sessions]);
 
+  // Phase-20: resolve the effective sliding window size for the current session.
+  // Used by the boundary marker in the message feed AND the Phase 14/19 trigger
+  // below — single source of truth keeps the UI and the LLM payload in lockstep.
+  const effectiveWindowSize = useMemo(() => {
+    const currentSession: any = sessions.find((s: any) => s.id === sessionId);
+    const custom = currentSession?.windowSize;
+    if (typeof custom === 'number' && custom >= 5 && custom <= 50) return custom;
+    return SLIDING_WINDOW_SIZE;
+  }, [sessions, sessionId]);
+
+  // Phase-20: debounced persistence of the per-session window size from the slider.
+  const windowSizeDebounceRef = useRef<number | null>(null);
+  const handleWindowSizeChange = (newSize: number) => {
+    if (!sessionId) return;
+    const clamped = Math.max(5, Math.min(50, Math.round(newSize)));
+    // Optimistic local update so the boundary marker moves in the same frame.
+    setSessions(prev => prev.map((s: any) => s.id === sessionId ? { ...s, windowSize: clamped } : s));
+    if (windowSizeDebounceRef.current) {
+      window.clearTimeout(windowSizeDebounceRef.current);
+    }
+    windowSizeDebounceRef.current = window.setTimeout(() => {
+      updateDoc(doc(db, 'chatSessions', sessionId), { windowSize: clamped })
+        .catch(err => console.error('Failed to persist windowSize', err));
+    }, 400);
+  };
+
   // Compute activeThread dynamically
   const activeThread = useMemo(() => {
     const thread = [];
@@ -804,10 +830,9 @@ COMPRESSED OUTPUT:`;
       (sum: number, m: any) => sum + ((m.content || '').length),
       0
     );
-    // Phase-19: trigger on EITHER scale (5k+ chars) OR depth (messages beyond
-    // the sliding window). This guarantees the Executive Summary keeps up as
-    // turns roll off the outbound Gemini payload, so nothing is ever lost.
-    if (totalChars < 5000 && messages.length <= SLIDING_WINDOW_SIZE) return;
+    // Phase-19/20: trigger on EITHER scale (5k+ chars) OR depth (messages beyond
+    // the effective sliding window, which honours the per-session override).
+    if (totalChars < 5000 && messages.length <= effectiveWindowSize) return;
 
     const existingSummary: string = currentSession.longTermMemory || '';
     const existingCheckpointId: string | null = currentSession.longTermMemoryCheckpointId || null;
@@ -843,7 +868,7 @@ COMPRESSED OUTPUT:`;
     ).catch((err) => {
       console.error('Long-term memory dispatch failed:', err);
     });
-  }, [sessionId, messages, sessions, user]);
+  }, [sessionId, messages, sessions, user, effectiveWindowSize]);
 
   // Distilled Memory freshness check — evaluates whether the current session's
   // projectSummary is stale relative to the most recent interaction and, if so,
@@ -1343,14 +1368,22 @@ Your task is to proactively initiate the conversation.
           parts: [{ text: m.content }]
         })) as { role: 'user' | 'model', parts: { text: string }[] }[];
 
-        // Phase-19: apply the sliding window right before the transmit. In-memory
-        // only — `currentThread` / `messages` / Firestore are untouched. Anything
-        // that falls out of the tail is reconstructed for the LLM from the
-        // Executive Summary that ships as "Archived Conversation State" in the
-        // dynamically-injected system prompt.
-        const history = fullHistory.length > SLIDING_WINDOW_SIZE
-          ? fullHistory.slice(-SLIDING_WINDOW_SIZE)
+        // Phase-19 + Phase-20: apply the sliding window right before the transmit.
+        // The effective size is resolved once at the component scope (honours the
+        // per-session override or falls back to SLIDING_WINDOW_SIZE), so the slice
+        // here and the boundary marker in the UI always agree.
+        const history = fullHistory.length > effectiveWindowSize
+          ? fullHistory.slice(-effectiveWindowSize)
           : fullHistory;
+
+        // Phase-20: capture the messages that WILL be omitted from the outbound
+        // payload so we can estimate saved tokens after the stream completes.
+        const omittedThread = currentThread.length > effectiveWindowSize
+          ? currentThread.slice(0, currentThread.length - effectiveWindowSize)
+          : [];
+        const estimatedTokensSaved = Math.round(
+          omittedThread.reduce((sum: number, m: any) => sum + ((m.content || '').length), 0) / 4
+        );
 
         const currentSession = sessions.find(s => s.id === targetSessionId);
         const activeSettingsData = currentSession || pendingSettings;
@@ -1427,6 +1460,11 @@ Your task is to proactively initiate the conversation.
         // fast the network delivered. We now flush each network chunk straight
         // into state, wrapped in startTransition so React's concurrent scheduler
         // can prioritize input/frame work above typing-effect repaints.
+        // Phase-20: the SDK emits usageMetadata on final chunks. We overwrite as we
+        // go so the last-seen value wins, then persist it to the session's
+        // tokenEconomy node once the stream completes.
+        let lastUsageMetadata: any = null;
+
         if (stream) {
           try {
             for await (const chunk of stream) {
@@ -1440,6 +1478,9 @@ Your task is to proactively initiate the conversation.
                     )
                   );
                 });
+              }
+              if ((chunk as any).usageMetadata) {
+                lastUsageMetadata = (chunk as any).usageMetadata;
               }
             }
           } catch (error: any) {
@@ -1532,7 +1573,26 @@ Your task is to proactively initiate the conversation.
           activeLeafId: aiDocRefResult.id,
           updatedAt: Timestamp.now()
         });
-        
+
+        // Phase-20 token economy telemetry: accumulate saved-tokens + actual usage
+        // onto the session doc. Non-blocking — UI doesn't wait for this write.
+        if (estimatedTokensSaved > 0 || lastUsageMetadata) {
+          const sessionForEcon = sessions.find((s: any) => s.id === targetSessionId);
+          const priorEcon = (sessionForEcon as any)?.tokenEconomy || { totalSaved: 0, totalIn: 0, totalOut: 0 };
+          const promptTokens = Number(lastUsageMetadata?.promptTokenCount ?? 0);
+          const responseTokens = Number(lastUsageMetadata?.candidatesTokenCount ?? 0);
+          updateDoc(doc(db, 'chatSessions', targetSessionId!), {
+            tokenEconomy: {
+              totalSaved: (priorEcon.totalSaved || 0) + estimatedTokensSaved,
+              totalIn: (priorEcon.totalIn || 0) + promptTokens,
+              totalOut: (priorEcon.totalOut || 0) + responseTokens,
+              lastTurnIn: promptTokens,
+              lastTurnOut: responseTokens,
+              lastUpdated: Timestamp.now()
+            }
+          }).catch((err) => console.warn('Token economy update failed', err));
+        }
+
         const currentCount = messages.length + 2;
 
         if (needsImmediateSync || (currentCount > 0 && currentCount % 6 === 0)) {
@@ -2019,6 +2079,9 @@ Your task is to proactively initiate the conversation.
                         graph={currentSession?.knowledgeGraph || null}
                         updatedAt={updatedAtMs ? new Date(updatedAtMs) : null}
                         isArabic={useArabicLayout}
+                        windowSize={effectiveWindowSize}
+                        onWindowSizeChange={handleWindowSizeChange}
+                        tokenEconomy={(currentSession as any)?.tokenEconomy || null}
                       />
                     </Suspense>
                   )}
@@ -2393,26 +2456,50 @@ Your task is to proactively initiate the conversation.
         <div id="load-more-trigger" ref={loadMoreRef} className="h-4 w-full flex justify-center items-center my-2">
             {messages.length >= messageLimit && messages.length > 0 && <Loader2 className="w-4 h-4 text-muted-foreground animate-spin" />}
         </div>
-        {[...activeThread].map((msg: any) => (
-          <MessageBubble 
-            key={msg.id} 
-            msg={msg} 
-            user={user} 
-            sessionId={sessionId} 
-            sessions={sessions} 
-            globalDefaults={globalDefaults} 
-            isArabic={isArabic} 
-            t={t} 
-            messages={messages}
-            activeLeafId={activeLeafId}
-            setActiveLeafId={setActiveLeafId}
-            onEditSubmit={(content: string) => sendMessage(msg.parentId, content)}
-            onDelete={deleteMessageBranch}
-            onRegenerate={handleRegenerate}
-            localSearchQuery={localSearchQuery}
-            isActiveSearchMatch={msg.id === searchMatches[activeMatchIndex]}
-          />
-        ))}
+        {(() => {
+          const threadArr = [...activeThread];
+          // Phase-20 archive boundary: insert a semantic divider exactly between
+          // the archived turns (folded into long-term memory on the server) and
+          // the active window (sent verbatim in the next request).
+          const boundaryIdx = threadArr.length > effectiveWindowSize
+            ? threadArr.length - effectiveWindowSize
+            : -1;
+          const useArabicLayout = !!globalDefaults?.userLang?.startsWith('ar');
+          return threadArr.map((msg: any, idx: number) => (
+            <Fragment key={msg.id}>
+              {idx === boundaryIdx && (
+                <div
+                  role="separator"
+                  aria-label={useArabicLayout ? 'حد السياق المؤرشف' : 'Archived context boundary'}
+                  className="relative py-2 my-2 flex items-center justify-center"
+                >
+                  <div className="absolute inset-x-0 top-1/2 border-t border-dashed border-zinc-800/70" aria-hidden="true" />
+                  <span className="relative inline-flex items-center gap-1.5 bg-background px-3 py-0.5 text-[9px] uppercase tracking-widest text-zinc-500 font-mono">
+                    <BookText className="w-3 h-3 opacity-60" aria-hidden="true" />
+                    {useArabicLayout ? 'حد السياق المؤرشف' : 'Archived Context Boundary'}
+                  </span>
+                </div>
+              )}
+              <MessageBubble
+                msg={msg}
+                user={user}
+                sessionId={sessionId}
+                sessions={sessions}
+                globalDefaults={globalDefaults}
+                isArabic={isArabic}
+                t={t}
+                messages={messages}
+                activeLeafId={activeLeafId}
+                setActiveLeafId={setActiveLeafId}
+                onEditSubmit={(content: string) => sendMessage(msg.parentId, content)}
+                onDelete={deleteMessageBranch}
+                onRegenerate={handleRegenerate}
+                localSearchQuery={localSearchQuery}
+                isActiveSearchMatch={msg.id === searchMatches[activeMatchIndex]}
+              />
+            </Fragment>
+          ));
+        })()}
         {processingAction && <LoadingBubble action={processingAction} />}
         {isDistilling && !processingAction && <LoadingBubble action="distilling" />}
       </div>
