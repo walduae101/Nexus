@@ -1,4 +1,4 @@
-import { Bug, CheckCircle2, CircleDashed, TerminalSquare, AlertCircle, Check } from 'lucide-react';
+import { Bug, CheckCircle2, CircleDashed, TerminalSquare, AlertCircle, Check, Sparkles } from 'lucide-react';
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from '@/components/ui/sheet';
 import { Issue, setIssueStatus } from '@/lib/memory';
 import { useState } from 'react';
@@ -57,34 +57,56 @@ export function IssuesPanel({ issues, sessionId }: { issues: Issue[]; sessionId:
                   {isArabic ? 'كل شيء على ما يرام. لا توجد مشاكل نشطة.' : 'All clear. No active issues tracked.'}
                 </div>
               ) : (
-                activeIssues.map(issue => (
-                  <div key={issue.id} className="bg-red-950/20 border border-red-900/50 rounded-xl p-4 shadow-sm">
-                    <div className="flex gap-3">
-                      <div className="mt-1"><CircleDashed className="w-4 h-4 text-red-400 animate-spin-slow" /></div>
-                      <div className="flex-1">
-                        <p className="text-sm text-zinc-200 font-medium mb-2">{issue.description}</p>
-                        {issue.attemptedFixes && (
-                          <div className="bg-black/40 rounded-lg p-3 border border-red-900/30">
-                            <h4 className="text-[10px] uppercase tracking-wider text-red-400/80 mb-1 font-bold">{isArabic ? 'المحاولات الفاشلة' : 'Failed Attempts'}</h4>
-                            <p className="text-xs text-zinc-400 font-mono leading-relaxed text-start rtl:text-right" dir="ltr">{issue.attemptedFixes}</p>
+                activeIssues.map(issue => {
+                  const conf = issue.resolutionConfidence ?? 0;
+                  const isSuggestedResolved = conf >= 0.6;
+                  return (
+                    <div
+                      key={issue.id}
+                      className={`rounded-xl p-4 shadow-sm border transition-all ${
+                        isSuggestedResolved
+                          ? 'bg-amber-950/20 border-amber-700/50 ring-1 ring-amber-600/20'
+                          : 'bg-red-950/20 border-red-900/50'
+                      }`}
+                    >
+                      <div className="flex gap-3">
+                        <div className="mt-1">
+                          <CircleDashed className={`w-4 h-4 animate-spin-slow ${isSuggestedResolved ? 'text-amber-400' : 'text-red-400'}`} />
+                        </div>
+                        <div className="flex-1">
+                          {isSuggestedResolved && (
+                            <div className="mb-2 inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider text-amber-400 bg-amber-950/40 border border-amber-800/50 rounded px-2 py-0.5">
+                              <Sparkles className="w-3 h-3" />
+                              <span>{isArabic ? 'يقترح الذكاء الاصطناعي الحل' : 'AI suggests resolution'}</span>
+                              <span className="opacity-60 ms-1">({Math.round(conf * 100)}%)</span>
+                            </div>
+                          )}
+                          <p className="text-sm text-zinc-200 font-medium mb-2">{issue.description}</p>
+                          {issue.attemptedFixes && (
+                            <div className={`bg-black/40 rounded-lg p-3 border ${isSuggestedResolved ? 'border-amber-900/30' : 'border-red-900/30'}`}>
+                              <h4 className={`text-[10px] uppercase tracking-wider mb-1 font-bold ${isSuggestedResolved ? 'text-amber-400/80' : 'text-red-400/80'}`}>
+                                {isArabic ? 'المحاولات الفاشلة' : 'Failed Attempts'}
+                              </h4>
+                              <p className="text-xs text-zinc-400 font-mono leading-relaxed text-start rtl:text-right" dir="ltr">{issue.attemptedFixes}</p>
+                            </div>
+                          )}
+                          <div className="mt-3 flex justify-end">
+                            <button
+                              type="button"
+                              onClick={() => handleResolve(issue.id)}
+                              disabled={!sessionId || resolvingId === issue.id}
+                              className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-green-400 hover:text-green-300 bg-green-950/30 hover:bg-green-900/40 border border-green-900/50 hover:border-green-800 rounded-lg px-3 py-1.5 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                              aria-label={isArabic ? 'تم الحل' : 'Mark Resolved'}
+                            >
+                              <Check className="w-3 h-3" />
+                              <span>{resolvingId === issue.id ? (isArabic ? 'جارٍ التحديث...' : 'Updating...') : (isArabic ? 'تم الحل' : 'Mark Resolved')}</span>
+                            </button>
                           </div>
-                        )}
-                        <div className="mt-3 flex justify-end">
-                          <button
-                            type="button"
-                            onClick={() => handleResolve(issue.id)}
-                            disabled={!sessionId || resolvingId === issue.id}
-                            className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-green-400 hover:text-green-300 bg-green-950/30 hover:bg-green-900/40 border border-green-900/50 hover:border-green-800 rounded-lg px-3 py-1.5 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-                            aria-label={isArabic ? 'تم الحل' : 'Mark Resolved'}
-                          >
-                            <Check className="w-3 h-3" />
-                            <span>{resolvingId === issue.id ? (isArabic ? 'جارٍ التحديث...' : 'Updating...') : (isArabic ? 'تم الحل' : 'Mark Resolved')}</span>
-                          </button>
                         </div>
                       </div>
                     </div>
-                  </div>
-                ))
+                  );
+                })
               )}
             </div>
           </div>

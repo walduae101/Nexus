@@ -7,6 +7,7 @@ export interface Issue {
   status: 'open' | 'resolved';
   description: string;
   attemptedFixes: string;
+  resolutionConfidence?: number;  // 0.0–1.0, optional — set by LLM during compression
 }
 
 export async function compressChatHistory(
@@ -40,9 +41,16 @@ CRITICAL RULE: You MUST output ONLY valid JSON using this EXACT schema, with NO 
 {
   "projectSummary": "...",
   "issuesScratchpad": [
-    { "id": "issue-123", "status": "open", "description": "...", "attemptedFixes": "..." }
+    { "id": "issue-123", "status": "open", "description": "...", "attemptedFixes": "...", "resolutionConfidence": 0.0 }
   ]
-}`;
+}
+
+CONFIDENCE SCORING RULE: For each issue with status="open", assign a resolutionConfidence between 0.0 and 1.0 based on how strongly recent context suggests the issue is resolved:
+  • 0.0–0.3 = no evidence of resolution, actively active bug
+  • 0.4–0.6 = partial or indirect evidence (e.g. a related fix was attempted, error may or may not recur)
+  • 0.7–0.9 = strong evidence (user or AI stated fix appears to work, but not yet explicitly confirmed)
+  • 1.0 = reserved for resolved issues (status="resolved"); use status transition instead
+Keep status="open" even at high confidence — only transition to "resolved" when the user or AI has EXPLICITLY confirmed the fix.`;
 
   try {
     const responseText = await fastTask(prompt);
@@ -53,7 +61,19 @@ CRITICAL RULE: You MUST output ONLY valid JSON using this EXACT schema, with NO 
     // Reconciliation: safeguard the LLM output against silent drops.
     // 1) Any previously-resolved issue missing from the LLM response is re-injected (preserves history).
     // 2) Any previously-open issue completely omitted by the LLM is re-injected (prevents accidental loss).
-    const llmIssues: Issue[] = Array.isArray(result.issuesScratchpad) ? result.issuesScratchpad : [];
+    // 3) Coerce resolutionConfidence into the [0, 1] range; strip if non-numeric or missing.
+    const rawLlmIssues: any[] = Array.isArray(result.issuesScratchpad) ? result.issuesScratchpad : [];
+    const llmIssues: Issue[] = rawLlmIssues.map(i => {
+      const conf = typeof i.resolutionConfidence === 'number' ? i.resolutionConfidence : undefined;
+      const clamped = conf === undefined || Number.isNaN(conf) ? undefined : Math.max(0, Math.min(1, conf));
+      const base: Issue = {
+        id: i.id,
+        status: i.status,
+        description: i.description,
+        attemptedFixes: i.attemptedFixes
+      };
+      return clamped !== undefined ? { ...base, resolutionConfidence: clamped } : base;
+    });
     const previousIssues: Issue[] = currentIssues || [];
     const llmIds = new Set(llmIssues.map(i => i.id));
     const droppedResolved = previousIssues.filter(i => i.status === 'resolved' && !llmIds.has(i.id));
@@ -85,7 +105,12 @@ export async function setIssueStatus(
     const sessionRef = doc(db, 'chatSessions', sessionId);
     const snap = await getDoc(sessionRef);
     const current: Issue[] = (snap.data()?.issuesScratchpad as Issue[]) || [];
-    const updated = current.map(i => (i.id === issueId ? { ...i, status } : i));
+    const updated: Issue[] = current.map(i => {
+      if (i.id !== issueId) return i;
+      // On manual resolve, drop any AI-suggested confidence — the user's action is authoritative.
+      const { resolutionConfidence: _drop, ...rest } = i;
+      return { ...rest, status };
+    });
     await setDoc(
       sessionRef,
       {
