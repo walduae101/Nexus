@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo } from 'react';
+import { useState, useEffect, useRef, useMemo, lazy, Suspense } from 'react';
 import { User } from 'firebase/auth';
 import { collection, query, orderBy, onSnapshot, addDoc,  doc, setDoc, where, updateDoc, deleteDoc, getDocs, limit , Timestamp } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType, storage, auth } from '@/lib/firebase';
@@ -40,6 +40,12 @@ const isArabic = (text: string) => /[\u0600-\u06FF]/.test(text || '');
 import { MessageBubble } from '@/features/chat/components/MessageBubble';
 import { MessageCopyButton, ActionableCodeBlock, RelativeTime, LoadingBubble } from '@/features/chat/components/ChatUIPrimitives';
 import { IssuesPanel } from '@/features/chat/components/IssuesPanel';
+
+// Distilled Memory Mirror — lazy-loaded. Rollup emits it as its own chunk that is
+// only fetched when the current session actually has a non-empty projectSummary.
+const DistilledMemoryMirror = lazy(() =>
+  import('./DistilledMemoryMirror').then(m => ({ default: m.DistilledMemoryMirror }))
+);
 
 export const generateSyncPrompt = (userPreferences?: string) => {
   const baseInstruction = `I am coordinating our workflow with Nexus. To ensure we stay synchronized, please generate a comprehensive current-state summary of the workspace. Include the latest updates on our modular architecture, the current status of the game logic and UI/UX polish, and any active system-level configurations.`;
@@ -555,7 +561,7 @@ export function NexusChat({ user, isSidebarOpen = true, setIsSidebarOpen }: { us
   const activeThread = useMemo(() => {
     const thread = [];
     let currentId = activeLeafId || (messages.length > 0 ? messages[messages.length - 1].id : null);
-    
+
     while (currentId) {
       const msg = messages.find((m: any) => m.id === currentId);
       if (!msg) break;
@@ -564,6 +570,47 @@ export function NexusChat({ user, isSidebarOpen = true, setIsSidebarOpen }: { us
     }
     return thread;
   }, [messages, activeLeafId]);
+
+  // Distilled Memory freshness check — evaluates whether the current session's
+  // projectSummary is stale relative to the most recent interaction and, if so,
+  // dispatches a background compressChatHistory call. Per-session cooldown
+  // (2 minutes) prevents repeated dispatches while messages are streaming in.
+  const summaryRefreshRef = useRef<Record<string, number>>({});
+  useEffect(() => {
+    if (!sessionId || !user || messages.length < 4) return;
+    const currentSession = sessions.find((s: any) => s.id === sessionId);
+    if (!currentSession) return;
+
+    const lastMsg = messages[messages.length - 1];
+    const lastMsgAt = lastMsg?.timestamp?.toMillis?.() ?? 0;
+    const summaryUpdatedAt = currentSession.projectSummaryUpdatedAt?.toMillis?.() ?? 0;
+    const summary = (currentSession.projectSummary || '').trim();
+
+    // Stale when: no summary yet, OR the latest message is at least 2 minutes
+    // newer than the last summary generation. Avoids thrashing during bursts.
+    const isStale = !summary || (lastMsgAt - summaryUpdatedAt > 120_000);
+    if (!isStale) return;
+
+    // Per-session cooldown — don't re-dispatch within 2 minutes per session.
+    const nowMs = Date.now();
+    const lastDispatchMs = summaryRefreshRef.current[sessionId] ?? 0;
+    if (nowMs - lastDispatchMs < 120_000) return;
+    summaryRefreshRef.current[sessionId] = nowMs;
+
+    const recentContext = messages
+      .slice(-10)
+      .map((m: any) => `[${m.role}]: ${m.content}`)
+      .join('\n\n');
+
+    compressChatHistory(
+      sessionId,
+      currentSession.projectSummary || '',
+      currentSession.issuesScratchpad || [],
+      recentContext
+    ).catch((err) => {
+      console.error('Distilled memory refresh failed:', err);
+    });
+  }, [sessionId, messages, sessions, user]);
 
   useEffect(() => {
     if (!localSearchQuery.trim()) {
@@ -1949,8 +1996,20 @@ Your task is to proactively initiate the conversation.
             </div>
           </div>
         )}
-        <div 
-          className="flex-1 overflow-y-auto p-4 space-y-6 [scrollbar-width:thin] [scrollbar-color:#3f3f46_transparent] [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-zinc-700 [&::-webkit-scrollbar-thumb]:rounded-full hover:[&::-webkit-scrollbar-thumb]:bg-zinc-600" 
+        {/* Distilled Memory Mirror: pinned above the scrollable feed. The chunk only
+            loads when the current session has a non-empty projectSummary. */}
+        {(() => {
+          const currentSessionSummary = (sessions.find((s: any) => s.id === sessionId)?.projectSummary || '').trim();
+          if (!currentSessionSummary) return null;
+          const useArabicLayout = !!globalDefaults?.userLang?.startsWith('ar');
+          return (
+            <Suspense fallback={null}>
+              <DistilledMemoryMirror summary={currentSessionSummary} isArabic={useArabicLayout} />
+            </Suspense>
+          );
+        })()}
+        <div
+          className="flex-1 overflow-y-auto p-4 space-y-6 [scrollbar-width:thin] [scrollbar-color:#3f3f46_transparent] [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-zinc-700 [&::-webkit-scrollbar-thumb]:rounded-full hover:[&::-webkit-scrollbar-thumb]:bg-zinc-600"
           ref={scrollRef}
           onScroll={handleScroll}
         >

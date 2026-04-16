@@ -96,10 +96,15 @@ Keep status="open" even at high confidence — only transition to "resolved" whe
     const reconciledIssues: Issue[] = [...llmIssues, ...droppedResolved, ...droppedOpen];
 
     const { fs: { doc, setDoc, Timestamp }, fb: { db } } = await loadFirebase();
+    const now = Timestamp.now();
     await setDoc(doc(db, 'chatSessions', sessionId), {
       projectSummary: result.projectSummary || currentSummary,
       issuesScratchpad: reconciledIssues,
-      updatedAt: Timestamp.now()
+      // `projectSummaryUpdatedAt` tracks the exact moment the distilled memory was
+      // regenerated. The session-mount freshness check in NexusChat compares this
+      // against the latest message timestamp to decide whether a refresh is needed.
+      projectSummaryUpdatedAt: now,
+      updatedAt: now
     }, { merge: true });
     } catch (err) {
     console.error('Failed to compress chat history and issues', err);
