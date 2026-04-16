@@ -3,7 +3,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 import { Check, Copy } from 'lucide-react';
-import { motion } from 'motion/react';
+import { m } from 'motion/react';
 import { useTranslation } from 'react-i18next';
 import { useSettings } from '@/contexts/SettingsContext';
 
@@ -123,9 +123,9 @@ export function LoadingBubble({ action }: { action: 'text' | 'image' | 'tts' | '
       </Avatar>
       <div className="flex-1 flex flex-col justify-center min-w-0">
         <div className="flex items-center gap-2 h-5 mt-1">
-          <motion.div className="w-2 h-2 bg-primary rounded-full ms-1" animate={{ y: [0, -5, 0] }} transition={{ duration: 0.6, repeat: Infinity, delay: 0 }} />
-          <motion.div className="w-2 h-2 bg-primary rounded-full" animate={{ y: [0, -5, 0] }} transition={{ duration: 0.6, repeat: Infinity, delay: 0.2 }} />
-          <motion.div className="w-2 h-2 bg-primary rounded-full" animate={{ y: [0, -5, 0] }} transition={{ duration: 0.6, repeat: Infinity, delay: 0.4 }} />
+          <m.div className="w-2 h-2 bg-primary rounded-full ms-1" animate={{ y: [0, -5, 0] }} transition={{ duration: 0.6, repeat: Infinity, delay: 0 }} />
+          <m.div className="w-2 h-2 bg-primary rounded-full" animate={{ y: [0, -5, 0] }} transition={{ duration: 0.6, repeat: Infinity, delay: 0.2 }} />
+          <m.div className="w-2 h-2 bg-primary rounded-full" animate={{ y: [0, -5, 0] }} transition={{ duration: 0.6, repeat: Infinity, delay: 0.4 }} />
           <span className="ms-3 text-xs font-medium bg-gradient-to-r from-teal-400 to-primary bg-clip-text text-transparent animate-pulse">{text}</span>
         </div>
       </div>

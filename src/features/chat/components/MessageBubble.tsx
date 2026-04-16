@@ -3,7 +3,7 @@ import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { ChevronUp, ChevronDown, ChevronLeft, ChevronRight, Download, Loader2, Mic, Pencil, Trash2, Terminal, RotateCw } from 'lucide-react';
-import { motion } from 'motion/react';
+import { m } from 'motion/react';
 import Markdown from 'react-markdown';
 import TextareaAutosize from 'react-textarea-autosize';
 import { MessageCopyButton, ActionableCodeBlock } from './ChatUIPrimitives';
@@ -75,7 +75,7 @@ export function MessageBubble({ msg, user, sessionId, sessions, globalDefaults, 
   };
 
   return (
-    <motion.div 
+    <m.div
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.3 }}
@@ -269,6 +269,6 @@ export function MessageBubble({ msg, user, sessionId, sessions, globalDefaults, 
           </div>
         )}
       </div>
-    </motion.div>
+    </m.div>
   );
 }

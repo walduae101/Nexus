@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectSeparator, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
-import { motion, AnimatePresence } from 'motion/react';
+import { m, AnimatePresence } from 'motion/react';
 import { Label } from '@/components/ui/label';
 
 export function OnboardingWizard() {
@@ -50,7 +50,7 @@ export function OnboardingWizard() {
         <CardContent className="min-h-[220px] pt-4">
           <AnimatePresence mode="wait">
             {step === 1 && (
-              <motion.div 
+              <m.div
                 key="step1"
                 initial={{ opacity: 0, x: 20 }}
                 animate={{ opacity: 1, x: 0 }}
@@ -79,11 +79,11 @@ export function OnboardingWizard() {
                     </SelectContent>
                   </Select>
                 </div>
-              </motion.div>
+              </m.div>
             )}
 
             {step === 2 && (
-              <motion.div 
+              <m.div
                 key="step2"
                 initial={{ opacity: 0, x: 20 }}
                 animate={{ opacity: 1, x: 0 }}
@@ -135,11 +135,11 @@ export function OnboardingWizard() {
                     </SelectContent>
                   </Select>
                 </div>
-              </motion.div>
+              </m.div>
             )}
 
             {step === 3 && (
-              <motion.div 
+              <m.div
                 key="step3"
                 initial={{ opacity: 0, x: 20 }}
                 animate={{ opacity: 1, x: 0 }}
@@ -156,7 +156,7 @@ export function OnboardingWizard() {
                     className="min-h-[120px] bg-zinc-900/50 border-zinc-800 focus:ring-1 focus:ring-primary/50 font-mono text-sm resize-none rounded-lg p-4"
                   />
                 </div>
-              </motion.div>
+              </m.div>
             )}
           </AnimatePresence>
         </CardContent>
