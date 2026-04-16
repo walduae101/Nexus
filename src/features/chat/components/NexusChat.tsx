@@ -774,6 +774,17 @@ COMPRESSED OUTPUT:`;
     return () => unsubscribe();
   }, [sessionId, messageLimit, sessions]);
 
+  // Phase-24: memoized per-session issues derivation. The `sessions` array is
+  // hydrated by the top-level onSnapshot listener for all of the user's sessions;
+  // here we isolate the active session's `issuesScratchpad` so IssuesPanel
+  // re-renders only when the active session's issues field actually changes —
+  // not on every NexusChat render. The memo recomputes atomically on sessionId
+  // change, guaranteeing zero "ghost render" of a prior session's issues.
+  const currentSessionIssues = useMemo(() => {
+    const session = sessions.find((s: any) => s.id === sessionId);
+    return (session?.issuesScratchpad as any[]) || [];
+  }, [sessions, sessionId]);
+
   // Phase-20: resolve the effective sliding window size for the current session.
   // Used by the boundary marker in the message feed AND the Phase 14/19 trigger
   // below — single source of truth keeps the UI and the LLM payload in lockstep.
@@ -2165,7 +2176,7 @@ Your task is to proactively initiate the conversation.
                 </Button>
               </div>
             )}
-            <IssuesPanel issues={sessions.find(s => s.id === sessionId)?.issuesScratchpad || []} sessionId={sessionId} />
+            <IssuesPanel issues={currentSessionIssues} sessionId={sessionId} />
             {/* Executive Summary trigger button — always mounted, sidebar chunk is lazy. */}
             {(() => {
               const currentSession = sessions.find((s: any) => s.id === sessionId);

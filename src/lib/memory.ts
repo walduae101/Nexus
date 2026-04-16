@@ -23,6 +23,9 @@ export interface Issue {
   description: string;
   attemptedFixes: string;
   resolutionConfidence?: number;  // 0.0–1.0, optional — set by LLM during compression
+  sessionId?: string;             // Phase-24: self-descriptive scope tag. Always matches the
+                                  // parent chatSessions doc id. Redundant with doc nesting
+                                  // but makes each Issue portable across future queries.
 }
 
 export async function compressChatHistory(
@@ -89,18 +92,27 @@ Keep status="open" even at high confidence — only transition to "resolved" whe
     const llmIssues: Issue[] = rawLlmIssues.map(i => {
       const conf = typeof i.resolutionConfidence === 'number' ? i.resolutionConfidence : undefined;
       const clamped = conf === undefined || Number.isNaN(conf) ? undefined : Math.max(0, Math.min(1, conf));
+      // Phase-24: every persisted issue carries its sessionId explicitly so the
+      // data is self-descriptive even if an entry is ever pulled out of context.
       const base: Issue = {
         id: i.id,
         status: i.status,
         description: i.description,
-        attemptedFixes: i.attemptedFixes
+        attemptedFixes: i.attemptedFixes,
+        sessionId
       };
       return clamped !== undefined ? { ...base, resolutionConfidence: clamped } : base;
     });
     const previousIssues: Issue[] = currentIssues || [];
     const llmIds = new Set(llmIssues.map(i => i.id));
-    const droppedResolved = previousIssues.filter(i => i.status === 'resolved' && !llmIds.has(i.id));
-    const droppedOpen = previousIssues.filter(i => i.status === 'open' && !llmIds.has(i.id));
+    // Phase-24: also backfill sessionId on any preserved legacy issues that
+    // predate this phase (stored without the tag).
+    const droppedResolved = previousIssues
+      .filter(i => i.status === 'resolved' && !llmIds.has(i.id))
+      .map(i => (i.sessionId ? i : { ...i, sessionId }));
+    const droppedOpen = previousIssues
+      .filter(i => i.status === 'open' && !llmIds.has(i.id))
+      .map(i => (i.sessionId ? i : { ...i, sessionId }));
     const reconciledIssues: Issue[] = [...llmIssues, ...droppedResolved, ...droppedOpen];
 
     // Phase-21 resolution telemetry: capture the new `recentResolutions` block
@@ -303,8 +315,9 @@ export async function setIssueStatus(
     const updated: Issue[] = current.map(i => {
       if (i.id !== issueId) return i;
       // On manual resolve, drop any AI-suggested confidence — the user's action is authoritative.
+      // Also backfill sessionId on legacy entries.
       const { resolutionConfidence: _drop, ...rest } = i;
-      return { ...rest, status };
+      return { ...rest, status, sessionId: rest.sessionId || sessionId };
     });
     await setDoc(
       sessionRef,
