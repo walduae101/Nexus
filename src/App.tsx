@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, lazy, Suspense } from 'react';
 import { auth, db, handleFirestoreError, OperationType } from './lib/firebase';
 import { signInWithPopup, GoogleAuthProvider, signOut, onAuthStateChanged, User } from 'firebase/auth';
 import { doc, setDoc, getDoc, Timestamp } from 'firebase/firestore';
@@ -15,12 +15,16 @@ import {
   DropdownMenuTrigger} from "@/components/ui/dropdown-menu";
 
 import { SettingsProvider, useSettings } from '@/contexts/SettingsContext';
-import { OnboardingWizard } from '@/features/onboarding/components/OnboardingWizard';
-import { GlobalSettings } from '@/features/settings/components/GlobalSettings';
-import { SparksIntroModal } from '@/features/sparks/components/SparksIntroModal';
 import { DualModeIntroModal } from '@/features/chat/components/DualModeIntroModal';
 import { ReleaseNotesModal } from '@/components/ReleaseNotesModal';
 import { TooltipProvider } from '@/components/ui/tooltip';
+
+const OnboardingWizard = lazy(() =>
+  import('@/features/onboarding/components/OnboardingWizard').then(m => ({ default: m.OnboardingWizard }))
+);
+const SparksIntroModal = lazy(() =>
+  import('@/features/sparks/components/SparksIntroModal').then(m => ({ default: m.SparksIntroModal }))
+);
 
 function AppContent() {
   const [user, setUser] = useState<User | null>(null);
@@ -99,18 +103,40 @@ function AppContent() {
 
 function NexusWorkspace({ user, isSidebarOpen, setIsSidebarOpen, signOut, auth, t, i18n }: any) {
   const { globalDefaults } = useSettings();
+  const [showSparks, setShowSparks] = useState(false);
+
+  useEffect(() => {
+    const hasSeen = localStorage.getItem('nexus_sparks_intro_seen');
+    if (!hasSeen) {
+      const timer = setTimeout(() => setShowSparks(true), 1500);
+      return () => clearTimeout(timer);
+    }
+  }, []);
+
+  const handleSparksClose = () => {
+    localStorage.setItem('nexus_sparks_intro_seen', 'true');
+    setShowSparks(false);
+  };
 
   const sizeClass = globalDefaults?.fontSize === 'small' ? 'text-sm' : globalDefaults?.fontSize === 'large' ? 'text-lg' : 'text-base';
   const fontStyle = globalDefaults?.fontFamily === 'cairo' ? { fontFamily: "'Cairo', sans-serif" } : globalDefaults?.fontFamily === 'tajawal' ? { fontFamily: "'Tajawal', sans-serif" } : {};
 
   return (
     <div className={`w-full h-screen ${sizeClass}`} style={fontStyle}>
-      {globalDefaults && globalDefaults.hasCompletedOnboarding === false && <OnboardingWizard />}
+      {globalDefaults && globalDefaults.hasCompletedOnboarding === false && (
+        <Suspense fallback={null}>
+          <OnboardingWizard />
+        </Suspense>
+      )}
       <div className="flex h-full bg-background text-foreground overflow-hidden">
         <div className="flex flex-col w-full h-full max-w-7xl mx-auto">
           <main className="flex-1 overflow-hidden flex flex-col relative">
             <ReleaseNotesModal />
-            <SparksIntroModal />
+            {showSparks && (
+              <Suspense fallback={null}>
+                <SparksIntroModal onClose={handleSparksClose} />
+              </Suspense>
+            )}
             <DualModeIntroModal />
             <div className="flex-1 overflow-hidden flex flex-col bg-background">
               <NexusChat user={user} isSidebarOpen={isSidebarOpen} setIsSidebarOpen={setIsSidebarOpen} />

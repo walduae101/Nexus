@@ -1,26 +1,8 @@
-import React, { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Lightbulb } from 'lucide-react';
 
-export function SparksIntroModal() {
+export function SparksIntroModal({ onClose }: { onClose: () => void }) {
   const { t } = useTranslation();
-  const [isOpen, setIsOpen] = useState(false);
-
-  useEffect(() => {
-    const hasSeen = localStorage.getItem('nexus_sparks_intro_seen');
-    if (!hasSeen) {
-      // Add a slight delay for dramatic effect after app load
-      const timer = setTimeout(() => setIsOpen(true), 1500);
-      return () => clearTimeout(timer);
-    }
-  }, []);
-
-  const handleClose = () => {
-    localStorage.setItem('nexus_sparks_intro_seen', 'true');
-    setIsOpen(false);
-  };
-
-  if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-background/80 backdrop-blur-sm p-4">
@@ -44,8 +26,8 @@ export function SparksIntroModal() {
           ))}
         </ul>
         
-        <button 
-          onClick={handleClose}
+        <button
+          onClick={onClose}
           className="w-full py-3 rounded-xl bg-primary text-primary-foreground font-semibold hover:bg-primary/90 transition-colors shadow-lg shadow-primary/20 hover:shadow-primary/30 active:scale-[0.98]"
         >
           {t('sparks_intro_btn')}
