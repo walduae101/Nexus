@@ -21,6 +21,39 @@ async function getAI() {
   return aiSingletonPromise;
 }
 
+/**
+ * Heuristic to detect upstream transient failures worth retrying.
+ * Covers 503 UNAVAILABLE (high demand), 429 rate limits, and connection errors.
+ */
+function isRetryableError(err: any): boolean {
+  if (!err) return false;
+  const code = err.code ?? err.status ?? err.response?.status;
+  if (code === 503 || code === 429 || code === 500 || code === 502 || code === 504) return true;
+  const status = String(err.status ?? '').toUpperCase();
+  if (status === 'UNAVAILABLE' || status === 'RESOURCE_EXHAUSTED' || status === 'DEADLINE_EXCEEDED') return true;
+  const msg = String(err.message ?? err ?? '');
+  return /high demand|rate limit|temporarily unavailable|unavailable|try again later|overloaded/i.test(msg);
+}
+
+/**
+ * Exponential backoff retry: 1s → 2s → 4s → fail. Only retries on transient upstream errors.
+ */
+async function withRetry<T>(fn: () => Promise<T>, maxAttempts = 3): Promise<T> {
+  let lastErr: any;
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      lastErr = err;
+      if (!isRetryableError(err) || attempt === maxAttempts - 1) throw err;
+      const delayMs = Math.pow(2, attempt) * 1000;
+      console.warn(`[gemini] Transient error on attempt ${attempt + 1}/${maxAttempts}, retrying in ${delayMs}ms...`, err);
+      await new Promise(r => setTimeout(r, delayMs));
+    }
+  }
+  throw lastErr;
+}
+
 export const SYSTEM_INSTRUCTION = `
 **Role:** The Nexus - An elite AI System Architect, Prompt Engineer, and Technical Translator.
 **Objective:** You act as a dynamic routing system bridging unstructured user thoughts ("vibe coding") into either highly structured commands for the Antigravity IDE (Mode A) or comprehensive prompt engineering architectures for Google AI Studio (Mode B).
@@ -182,15 +215,6 @@ CRITICAL BEHAVIORAL MODULATION:
     dynamicInstruction += memoryBlock;
   }
 
-  const chatWithHistory = ai.chats.create({
-    model: model,
-    history: history,
-    config: {
-      systemInstruction: dynamicInstruction,
-      thinkingConfig: useThinking ? { thinkingLevel: ThinkingLevel.HIGH } : undefined,
-    }
-  });
-
   const targetLanguage = settings?.userLang === 'ar-AE' ? 'Emirati Arabic (اللهجة الإماراتية)' : (settings?.userLang || 'English');
   const modeRules = settings?.complexityModeRules || 'Standard rules';
 
@@ -210,10 +234,33 @@ CRITICAL BEHAVIORAL MODULATION:
 
   const finalMessagePayload = message + dynamicLastMile;
 
-  return await chatWithHistory.sendMessageStream({ 
-    message: finalMessagePayload,
-    config: abortSignal ? { abortSignal } : undefined 
-  });
+  // Attempt the requested model first with exponential-backoff retry on transient upstream errors.
+  // If the Pro model is exhausted after retries, transparently fall back to Flash so the user
+  // still gets a response instead of a hard failure.
+  const sendStream = (targetModel: typeof model, allowThinking: boolean) => {
+    const chat = ai.chats.create({
+      model: targetModel,
+      history: history,
+      config: {
+        systemInstruction: dynamicInstruction,
+        thinkingConfig: allowThinking ? { thinkingLevel: ThinkingLevel.HIGH } : undefined,
+      }
+    });
+    return chat.sendMessageStream({
+      message: finalMessagePayload,
+      config: abortSignal ? { abortSignal } : undefined
+    });
+  };
+
+  try {
+    return await withRetry(() => sendStream(model, useThinking));
+  } catch (err) {
+    if (model === 'gemini-3.1-pro-preview' && isRetryableError(err)) {
+      console.warn('[gemini] Pro model unavailable after retries — falling back to gemini-3-flash-preview');
+      return await withRetry(() => sendStream('gemini-3-flash-preview', false));
+    }
+    throw err;
+  }
 }
 
 export async function generateImage(prompt: string, model: 'gemini-3.1-flash-image-preview' | 'gemini-3-pro-image-preview', aspectRatio: string, size: string) {

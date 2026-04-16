@@ -1,11 +1,8 @@
 import { useEffect, useState, lazy, Suspense } from 'react';
-import { auth, db, handleFirestoreError, OperationType } from './lib/firebase';
-import { signInWithPopup, GoogleAuthProvider, signOut, onAuthStateChanged, User } from 'firebase/auth';
-import { doc, setDoc, getDoc, Timestamp } from 'firebase/firestore';
+import type { User } from 'firebase/auth';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { NexusChat } from '@/features/chat/components/NexusChat';
 import { LogOut, Globe, PanelLeftClose, PanelLeftOpen } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import {
@@ -19,6 +16,11 @@ import { DualModeIntroModal } from '@/features/chat/components/DualModeIntroModa
 import { ReleaseNotesModal } from '@/components/ReleaseNotesModal';
 import { TooltipProvider } from '@/components/ui/tooltip';
 
+// Firebase vendor code, onboarding, sparks, and the entire NexusChat feature tree
+// all load via dynamic imports — Rollup isolates them into separate async chunks.
+const NexusChat = lazy(() =>
+  import('@/features/chat/components/NexusChat').then(m => ({ default: m.NexusChat }))
+);
 const OnboardingWizard = lazy(() =>
   import('@/features/onboarding/components/OnboardingWizard').then(m => ({ default: m.OnboardingWizard }))
 );
@@ -32,35 +34,52 @@ function AppContent() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const { t, i18n } = useTranslation();
 
-
-
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
-      setUser(currentUser);
-      if (currentUser) {
-        try {
-          const userRef = doc(db, 'users', currentUser.uid);
-          const userSnap = await getDoc(userRef);
-          if (!userSnap.exists()) {
-            await setDoc(userRef, {
-              uid: currentUser.uid,
-              email: currentUser.email,
-              displayName: currentUser.displayName,
-              photoURL: currentUser.photoURL,
-              role: 'user',
-              createdAt: Timestamp.now()
-            });
+    let unsubscribe: (() => void) | undefined;
+    (async () => {
+      // Dynamically load Firebase on first mount — keeps vendor SDK out of initial bundle.
+      const [
+        { auth, db, handleFirestoreError, OperationType },
+        { onAuthStateChanged },
+        { doc, getDoc, setDoc, Timestamp }
+      ] = await Promise.all([
+        import('./lib/firebase'),
+        import('firebase/auth'),
+        import('firebase/firestore'),
+      ]);
+
+      unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
+        setUser(currentUser);
+        if (currentUser) {
+          try {
+            const userRef = doc(db, 'users', currentUser.uid);
+            const userSnap = await getDoc(userRef);
+            if (!userSnap.exists()) {
+              await setDoc(userRef, {
+                uid: currentUser.uid,
+                email: currentUser.email,
+                displayName: currentUser.displayName,
+                photoURL: currentUser.photoURL,
+                role: 'user',
+                createdAt: Timestamp.now()
+              });
+            }
+          } catch (error) {
+            handleFirestoreError(error, OperationType.CREATE, `users/${currentUser.uid}`);
           }
-        } catch (error) {
-          handleFirestoreError(error, OperationType.CREATE, `users/${currentUser.uid}`);
         }
-      }
-      setLoading(false);
-    });
-    return () => unsubscribe();
+        setLoading(false);
+      });
+    })();
+    return () => unsubscribe?.();
   }, []);
 
   const login = async () => {
+    // Dynamic import on click — module is likely already cached from the useEffect preload.
+    const [{ auth }, { signInWithPopup, GoogleAuthProvider }] = await Promise.all([
+      import('./lib/firebase'),
+      import('firebase/auth'),
+    ]);
     const provider = new GoogleAuthProvider();
     try {
       await signInWithPopup(auth, provider);
@@ -96,7 +115,7 @@ function AppContent() {
 
   return (
     <SettingsProvider user={user}>
-      <NexusWorkspace user={user} isSidebarOpen={isSidebarOpen} setIsSidebarOpen={setIsSidebarOpen} signOut={signOut} auth={auth} t={t} i18n={i18n} />
+      <NexusWorkspace user={user} isSidebarOpen={isSidebarOpen} setIsSidebarOpen={setIsSidebarOpen} t={t} i18n={i18n} />
     </SettingsProvider>
   );
 }
@@ -139,7 +158,9 @@ function NexusWorkspace({ user, isSidebarOpen, setIsSidebarOpen, signOut, auth, 
             )}
             <DualModeIntroModal />
             <div className="flex-1 overflow-hidden flex flex-col bg-background">
-              <NexusChat user={user} isSidebarOpen={isSidebarOpen} setIsSidebarOpen={setIsSidebarOpen} />
+              <Suspense fallback={<div className="flex-1 flex items-center justify-center text-muted-foreground text-sm">Loading workspace...</div>}>
+                <NexusChat user={user} isSidebarOpen={isSidebarOpen} setIsSidebarOpen={setIsSidebarOpen} />
+              </Suspense>
             </div>
           </main>
         </div>
