@@ -1,4 +1,5 @@
 import { IDE_PROFILES } from '@/features/settings/constants';
+import firebaseConfig from '@/../firebase-applet-config.json';
 
 // Dynamic loader for @google/genai — Rollup splits this into a separate chunk.
 // The module only loads on first invocation of any chat/image/audio/search helper,
@@ -193,6 +194,22 @@ CRITICAL: You MUST mimic the exact structure, brevity, and format of the Nexus r
     const memoryBlock = `\n\n[CURRENT PROJECT STATE & MEMORY]:\n${settings.projectSummary}\n\n`;
     dynamicInstruction += memoryBlock;
   }
+
+  // Phase 21 — cloud config injection. Any infrastructure command, IDE payload,
+  // or shell script the model emits should reference these exact values instead
+  // of placeholders like YOUR_PROJECT_ID. The named Firestore DB in particular
+  // matters because default-DB commands would silently target the wrong silo.
+  dynamicInstruction += `\n\n[TARGET CLOUD INFRASTRUCTURE — ACTIVE DEPLOYMENT ENVIRONMENT]:
+Any IDE payload, shell script, Firebase CLI invocation, Cloud Function, or GCP resource configuration you generate MUST reference these exact credentials verbatim (do NOT use placeholders such as YOUR_PROJECT_ID, <project>, etc.):
+
+- Firebase Project ID:    ${firebaseConfig.projectId}
+- Firebase App ID:        ${firebaseConfig.appId}
+- API Key:                ${firebaseConfig.apiKey}
+- Auth Domain:            ${firebaseConfig.authDomain}
+- Firestore Database ID:  ${firebaseConfig.firestoreDatabaseId} (NAMED DATABASE — always pass --database=${firebaseConfig.firestoreDatabaseId} to firebase CLI, or the databaseId arg to getFirestore)
+- Storage Bucket:         ${firebaseConfig.storageBucket}
+- Messaging Sender ID:    ${firebaseConfig.messagingSenderId}
+`;
 
   if (settings?.longTermMemory) {
     dynamicInstruction += `\n\n[ARCHIVED CONVERSATION STATE — BEYOND ACTIVE WINDOW]:\nThe history array in this request is a sliding window of the most recent turns. Earlier turns have been rolled out of the window but are preserved below as an executive-level summary of the strategic objectives, architectural decisions, variables, and continuity from the archived portion of this session. Treat this as authoritative memory for any decision or commitment that preceded the visible history array. Never claim to "not remember" something that appears here.\n\n${settings.longTermMemory}\n\n`;

@@ -43,6 +43,7 @@ import { IssuesPanel } from '@/features/chat/components/IssuesPanel';
 import { InputTelemetry, CompressPayloadButton, MAX_INPUT_CHARS } from './InputTelemetry';
 import { InputGhostOverlay } from './InputGhostOverlay';
 import { NextActionPill } from './NextActionPill';
+import { ToastStack, type ToastItem } from './ToastNotification';
 
 // Regex used to extract the <<<NEXT_ACTION>>>...<<<END_NEXT_ACTION>>> tag appended
 // by the model under the Phase 15 NEXT ACTION TAG directive. Stripped from both
@@ -124,6 +125,7 @@ export function NexusChat({ user, isSidebarOpen = true, setIsSidebarOpen }: { us
   const [ghostSuggestion, setGhostSuggestion] = useState('');
   const [isSummarySidebarOpen, setIsSummarySidebarOpen] = useState(false);
   const [nextActionSuggestion, setNextActionSuggestion] = useState<string | null>(null);
+  const [toasts, setToasts] = useState<ToastItem[]>([]);
 
   // Phase-17 Snapshot Guard — holds the sessionId whose AI response is actively
   // streaming. While non-null and equal to the messages-listener's sessionId,
@@ -869,6 +871,43 @@ COMPRESSED OUTPUT:`;
       console.error('Long-term memory dispatch failed:', err);
     });
   }, [sessionId, messages, sessions, user, effectiveWindowSize]);
+
+  // Phase-21: detect newly-resolved issues and surface a transient toast.
+  // Tracks shown `issue_id`s per session — first observation of a session
+  // seeds the set without toasting (avoids flooding on reload), then each
+  // subsequent pass surfaces only IDs that weren't already shown.
+  const shownResolutionIdsRef = useRef<Map<string, Set<string>>>(new Map());
+  useEffect(() => {
+    if (!sessionId) return;
+    const currentSession = sessions.find((s: any) => s.id === sessionId);
+    if (!currentSession) return;
+
+    const resolutions: Array<{ issue_id: string; resolution_summary: string }> = Array.isArray(
+      (currentSession as any).recentResolutions
+    ) ? (currentSession as any).recentResolutions : [];
+
+    if (!shownResolutionIdsRef.current.has(sessionId)) {
+      // First observation for this session — seed the shown set with current
+      // entries so we don't toast already-known resolutions on reload.
+      shownResolutionIdsRef.current.set(sessionId, new Set(resolutions.map(r => r.issue_id)));
+      return;
+    }
+
+    const shown = shownResolutionIdsRef.current.get(sessionId)!;
+    const isArabic = !!globalDefaults?.userLang?.startsWith('ar');
+
+    resolutions.forEach(r => {
+      if (shown.has(r.issue_id)) return;
+      shown.add(r.issue_id);
+      const id = `toast-${sessionId}-${r.issue_id}-${Date.now()}`;
+      const title = isArabic ? 'تم وضع علامة على المشكلة تلقائياً كمُصلحة' : 'Issue Automatically Marked as Fixed';
+      setToasts(prev => [...prev, { id, title, description: r.resolution_summary || undefined }]);
+    });
+  }, [sessionId, sessions, globalDefaults]);
+
+  const dismissToast = (id: string) => {
+    setToasts(prev => prev.filter(t => t.id !== id));
+  };
 
   // Distilled Memory freshness check — evaluates whether the current session's
   // projectSummary is stale relative to the most recent interaction and, if so,
@@ -2747,6 +2786,14 @@ Your task is to proactively initiate the conversation.
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Phase-21 toast overlay — auto-dismiss, memoized, root-level so it floats
+          above all chat content regardless of scroll / modal state. */}
+      <ToastStack
+        toasts={toasts}
+        onDismiss={dismissToast}
+        isArabic={!!globalDefaults?.userLang?.startsWith('ar')}
+      />
     </div>
   );
 }

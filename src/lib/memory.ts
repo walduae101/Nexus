@@ -57,8 +57,13 @@ CRITICAL RULE: You MUST output ONLY valid JSON using this EXACT schema, with NO 
   "projectSummary": "...",
   "issuesScratchpad": [
     { "id": "issue-123", "status": "open", "description": "...", "attemptedFixes": "...", "resolutionConfidence": 0.0 }
+  ],
+  "recentResolutions": [
+    { "issue_id": "issue-123", "resolution_summary": "One-sentence description of how or when this issue was confirmed fixed in the latest context." }
   ]
 }
+
+PHASE-21 RESOLUTION TELEMETRY RULE: The "recentResolutions" array MUST contain an entry for EVERY issue that transitioned from "open" to "resolved" during THIS compression pass (and ONLY those — do not re-emit issues resolved in prior passes). Each entry's issue_id MUST match the id used in issuesScratchpad. The resolution_summary is a concise user-facing confirmation message (e.g., "Tests passing in the new CI run", "Deploy to staging confirmed healthy"). If no issues transitioned to resolved in this pass, output an empty array: "recentResolutions": [].
 
 CONFIDENCE SCORING RULE: For each issue with status="open", assign a resolutionConfidence between 0.0 and 1.0 based on how strongly recent context suggests the issue is resolved:
   • 0.0–0.3 = no evidence of resolution, actively active bug
@@ -95,6 +100,21 @@ Keep status="open" even at high confidence — only transition to "resolved" whe
     const droppedOpen = previousIssues.filter(i => i.status === 'open' && !llmIds.has(i.id));
     const reconciledIssues: Issue[] = [...llmIssues, ...droppedResolved, ...droppedOpen];
 
+    // Phase-21 resolution telemetry: capture the new `recentResolutions` block
+    // from the LLM. Only entries corresponding to issues that actually exist in
+    // the current scratchpad AND whose status is `resolved` are kept — defends
+    // against the model hallucinating resolution entries for non-existent or
+    // still-open issues.
+    const resolvedIssueIds = new Set(reconciledIssues.filter(i => i.status === 'resolved').map(i => i.id));
+    const rawResolutions: any[] = Array.isArray(result.recentResolutions) ? result.recentResolutions : [];
+    const recentResolutions = rawResolutions
+      .filter(r => r && typeof r.issue_id === 'string' && resolvedIssueIds.has(r.issue_id))
+      .map(r => ({
+        issue_id: String(r.issue_id),
+        resolution_summary: typeof r.resolution_summary === 'string' ? r.resolution_summary.slice(0, 200) : ''
+      }))
+      .slice(0, 10);
+
     const { fs: { doc, setDoc, Timestamp }, fb: { db } } = await loadFirebase();
     const now = Timestamp.now();
     await setDoc(doc(db, 'chatSessions', sessionId), {
@@ -104,6 +124,9 @@ Keep status="open" even at high confidence — only transition to "resolved" whe
       // regenerated. The session-mount freshness check in NexusChat compares this
       // against the latest message timestamp to decide whether a refresh is needed.
       projectSummaryUpdatedAt: now,
+      // `recentResolutions` is overwritten each pass — not append. NexusChat
+      // tracks shown IDs locally so past resolutions don't re-toast.
+      recentResolutions,
       updatedAt: now
     }, { merge: true });
     } catch (err) {
