@@ -41,6 +41,7 @@ import { MessageBubble } from '@/features/chat/components/MessageBubble';
 import { MessageCopyButton, ActionableCodeBlock, RelativeTime, LoadingBubble } from '@/features/chat/components/ChatUIPrimitives';
 import { IssuesPanel } from '@/features/chat/components/IssuesPanel';
 import { InputTelemetry, CompressPayloadButton, MAX_INPUT_CHARS } from './InputTelemetry';
+import { InputGhostOverlay } from './InputGhostOverlay';
 
 // Distilled Memory Mirror — lazy-loaded. Rollup emits it as its own chunk that is
 // only fetched when the current session actually has a non-empty projectSummary.
@@ -101,6 +102,7 @@ export function NexusChat({ user, isSidebarOpen = true, setIsSidebarOpen }: { us
   const [model, setModel] = useState<'gemini-3.1-pro-preview' | 'gemini-3-flash-preview' | 'gemini-3.1-flash-lite-preview'>('gemini-3.1-pro-preview');
   const [isLoading, setIsLoading] = useState(false);
   const [isCompressing, setIsCompressing] = useState(false);
+  const [ghostSuggestion, setGhostSuggestion] = useState('');
   const [hasInitialized, setHasInitialized] = useState(false);
   const [isForeshadowing, setIsForeshadowing] = useState(false);
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
@@ -337,6 +339,81 @@ export function NexusChat({ user, isSidebarOpen = true, setIsSidebarOpen }: { us
       }
     }
   };
+
+  // Ghost-text autocomplete — debounced predictive completion for the user-note
+  // input. Runs via Gemini Flash-Lite (fastTask, already deferred-lazy). Hides
+  // on IDE tab, short input, or when the cursor is not at the end. A double race
+  // guard (cancelled flag + value-change check) prevents stale suggestions from
+  // landing after the user has moved on.
+  useEffect(() => {
+    // Always clear the current suggestion when the input changes. A fresh fetch
+    // below will set a new one after the debounce window elapses.
+    setGhostSuggestion('');
+
+    if (activeTab !== 'user') return;
+    if (!input || input.trim().length < 6) return;
+    if (input.length > MAX_INPUT_CHARS * 0.5) return; // Save budget on large pastes — compress instead.
+    const ta = textareaRef.current;
+    if (!ta) return;
+    if (ta.selectionStart !== ta.value.length) return; // Only when cursor is at end.
+    if (isLoading || isCompressing || isForeshadowing) return;
+
+    let cancelled = false;
+    const timer = setTimeout(async () => {
+      if (cancelled) return;
+      try {
+        const recent = messages
+          .slice(-5)
+          .map((m: any) => `[${m.role}]: ${(m.content || '').slice(0, 500)}`)
+          .join('\n');
+        const prompt = `You are a silent realtime autocomplete engine predicting the user's next characters.
+
+STRICT RULES:
+1. Output ONLY the continuation text — no repetition of the partial input, no quotes, no preamble, no explanation.
+2. Maximum 40 characters.
+3. Match the user's writing style and language.
+4. If no confident prediction exists, output exactly the literal word NONE.
+
+RECENT CONVERSATION (last 5 turns):
+${recent || '(no prior turns)'}
+
+USER IS CURRENTLY TYPING:
+${input}
+
+CONTINUATION:`;
+        const raw = await fastTask(prompt);
+        if (cancelled) return;
+        // Race-check: value must still match what we fetched against.
+        if (textareaRef.current?.value !== input) return;
+
+        // Sanitize: strip quotes, common preambles, leading overlap with input,
+        // cap length, reject NONE/empty.
+        let clean = (raw || '').trim();
+        if (!clean || /^NONE\.?$/i.test(clean)) return;
+        clean = clean.replace(/^["'`]+|["'`]+$/g, '').trim();
+        clean = clean.replace(/^(completion|continuation|next|output)\s*[:=\-]\s*/i, '');
+        // Strip overlap where the model re-emitted the tail of the input.
+        for (let n = Math.min(25, input.length); n > 0; n--) {
+          const tail = input.slice(-n);
+          if (clean.toLowerCase().startsWith(tail.toLowerCase())) {
+            clean = clean.slice(n);
+            break;
+          }
+        }
+        if (clean.length > 60) clean = clean.slice(0, 60);
+        clean = clean.trim();
+        if (!clean) return;
+        setGhostSuggestion(clean);
+      } catch {
+        // Silent — no ghost suggestion shown, user sees no change.
+      }
+    }, 400);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [input, activeTab, messages, isLoading, isCompressing, isForeshadowing]);
 
   // Payload compression — routes the currently active input (user note OR IDE
   // payload) through `fastTask` (Gemini Flash-Lite) for lossless semantic
@@ -2219,13 +2296,31 @@ Your task is to proactively initiate the conversation.
               <Mic className="w-5 h-5" />
             </Button>
             <input type="file" ref={fileInputRef} onChange={handleFileSelect} className="hidden" accept="image/*" multiple />
-            <TextareaAutosize 
+            <div className="relative flex-1">
+              <InputGhostOverlay
+                input={activeTab === 'user' ? input : ''}
+                suggestion={activeTab === 'user' ? ghostSuggestion : ''}
+              />
+            <TextareaAutosize
               ref={textareaRef}
               dir={i18n.language.startsWith('ar') ? 'rtl' : 'ltr'}
-              value={activeTab === 'user' ? input : ideText} 
+              value={activeTab === 'user' ? input : ideText}
               onPaste={handlePaste}
               onChange={(e) => activeTab === 'user' ? setInput(e.target.value) : setIdeText(e.target.value)}
               onKeyDown={(e) => {
+                // Ghost-text commit: Tab accepts the suggestion when one is visible.
+                if (e.key === 'Tab' && ghostSuggestion && activeTab === 'user') {
+                  e.preventDefault();
+                  setInput(prev => prev + ghostSuggestion);
+                  setGhostSuggestion('');
+                  return;
+                }
+                // Escape dismisses the suggestion without committing.
+                if (e.key === 'Escape' && ghostSuggestion) {
+                  e.preventDefault();
+                  setGhostSuggestion('');
+                  return;
+                }
                 if (e.key === 'Enter' && !e.shiftKey) {
                   e.preventDefault(); // Prevent newline
                   
@@ -2263,11 +2358,12 @@ Your task is to proactively initiate the conversation.
                 }
               }}
               placeholder={isForeshadowing ? t('initializing') || 'Nexus is connecting...' : activeTool === 'image' ? 'Describe the image...' : activeTool === 'search' ? 'What do you want to search?' : activeTool === 'tts' ? 'What should I say?' : (activeTab === 'ide' ? (t('ide_payload') || 'Paste IDE Context/Code...') : t('ask_nexus'))} 
-              className={`bg-transparent border-none text-foreground flex-1 shadow-none w-full resize-none break-words whitespace-pre-wrap overflow-x-hidden overflow-y-auto py-2 text-start [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none] focus:outline-none focus:ring-0 focus-visible:ring-0 focus-visible:ring-offset-0 focus-visible:outline-none ${activeTab === 'ide' ? 'font-mono text-zinc-300 text-[0.8rem]' : ''} ${isForeshadowing ? 'opacity-50 cursor-not-allowed' : ''}`}
+              className={`relative bg-transparent border-none text-foreground shadow-none w-full resize-none break-words whitespace-pre-wrap overflow-x-hidden overflow-y-auto py-2 text-start [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none] focus:outline-none focus:ring-0 focus-visible:ring-0 focus-visible:ring-offset-0 focus-visible:outline-none ${activeTab === 'ide' ? 'font-mono text-zinc-300 text-[0.8rem]' : ''} ${isForeshadowing ? 'opacity-50 cursor-not-allowed' : ''}`}
               disabled={isLoading || isForeshadowing}
               minRows={1}
               maxRows={8}
             />
+            </div>
             {isLoading ? (
               <Button type="button" onClick={stopGeneration} className="bg-zinc-800 hover:bg-red-500/20 text-zinc-400 hover:text-red-400 shrink-0 rounded-xl transition-colors group" title="Stop generating">
                 <Square className="w-4 h-4 fill-current transition-transform group-hover:scale-90" />
