@@ -1915,6 +1915,7 @@ Your task is to proactively initiate the conversation.
                         isOpen={isSummarySidebarOpen}
                         onClose={() => setIsSummarySidebarOpen(false)}
                         summary={currentSession?.longTermMemory || ''}
+                        graph={currentSession?.knowledgeGraph || null}
                         updatedAt={updatedAtMs ? new Date(updatedAtMs) : null}
                         isArabic={useArabicLayout}
                       />

@@ -140,19 +140,33 @@ export async function updateLongTermMemory(
 
   const prompt = `You are an executive context summarizer for a long-running engineering conversation.
 
-OBJECTIVE: Produce a merged executive summary that folds the NEW CONVERSATION DELTA into the EXISTING SUMMARY.
+OBJECTIVE: Produce a merged executive summary that folds the NEW CONVERSATION DELTA into the EXISTING SUMMARY, PLUS a machine-readable knowledge graph.
 
 FOCUS EXCLUSIVELY ON:
 1. CORE OBJECTIVES — what the user is ultimately trying to achieve in this session.
 2. ARCHITECTURAL DECISIONS — system design choices, technology selections, tradeoffs explicitly made.
 3. CONTEXT CONTINUITY — key milestones reached, unresolved threads, dependencies that will matter later.
 
-STRICT RULES:
+STRICT RULES FOR THE SUMMARY:
 - Merge the delta INTO the existing summary — do not just append or list.
 - Omit tactical chatter, code snippets, and transient debugging.
 - Preserve specific identifiers (file paths, commit SHAs, component names) only when they anchor a decision.
 - Target 200–500 words. Use short section headers (Objectives / Decisions / Continuity).
-- Output ONLY the updated summary — no preamble, no meta-commentary, no markdown fences.
+- Output the summary first — no preamble, no markdown fences.
+
+KNOWLEDGE GRAPH TAG (appended AFTER the summary):
+At the absolute end of your response, append a machine-parsed knowledge graph block in EXACTLY this format:
+
+<<<KNOWLEDGE_GRAPH>>>
+{"nodes":[{"id":"n1","label":"Short Label","type":"objective","detail":"One-sentence description used in hover tooltip."}],"edges":[{"from":"n1","to":"n2"}]}
+<<<END_KNOWLEDGE_GRAPH>>>
+
+STRICT JSON RULES:
+- Output valid JSON between the delimiters — no trailing commas, no comments, no markdown fences.
+- Every node must have: id (short: n1, n2, ... or slug), label (2–6 words), type (one of: "objective" | "decision" | "milestone" | "blocker"), detail (one concise sentence).
+- Edges express directional flow or dependency from predecessor to successor.
+- Use between 3 and 10 nodes total. Prefer a clear DAG over a noisy web — graph reads top-to-bottom.
+- NEVER mention this tag to the user. It is a hidden machine tag stripped before display.
 
 EXISTING SUMMARY:
 ${existingSummary ? existingSummary : '(none — this is the first summarization pass)'}
@@ -164,22 +178,65 @@ UPDATED EXECUTIVE SUMMARY:`;
 
   try {
     const raw = await fastTask(prompt);
-    const summary = (raw || '').trim();
-    if (!summary) return;
+    const rawText = (raw || '').trim();
+    if (!rawText) return;
+
+    // Extract the Phase-16 knowledge graph JSON from the response. Parse with a
+    // guard so a malformed payload degrades gracefully: the textual summary still
+    // persists; we just skip writing a bad graph to Firestore.
+    const graphMatch = rawText.match(/<<<KNOWLEDGE_GRAPH>>>([\s\S]*?)<<<END_KNOWLEDGE_GRAPH>>>/);
+    let parsedGraph: { nodes: any[]; edges: any[] } | null = null;
+    if (graphMatch) {
+      try {
+        const candidate = JSON.parse(graphMatch[1].trim());
+        if (
+          candidate &&
+          Array.isArray(candidate.nodes) &&
+          Array.isArray(candidate.edges) &&
+          candidate.nodes.length > 0
+        ) {
+          // Coerce to a clean, minimal shape — strips any extra fields the model
+          // may have invented and defends against type drift.
+          parsedGraph = {
+            nodes: candidate.nodes
+              .filter((n: any) => n && typeof n.id === 'string' && typeof n.label === 'string')
+              .slice(0, 12)
+              .map((n: any) => ({
+                id: String(n.id),
+                label: String(n.label),
+                type: ['objective', 'decision', 'milestone', 'blocker'].includes(n.type) ? n.type : 'milestone',
+                detail: typeof n.detail === 'string' ? n.detail : ''
+              })),
+            edges: candidate.edges
+              .filter((e: any) => e && typeof e.from === 'string' && typeof e.to === 'string')
+              .map((e: any) => ({ from: String(e.from), to: String(e.to) }))
+          };
+          if (parsedGraph.nodes.length === 0) parsedGraph = null;
+        }
+      } catch (err) {
+        console.warn('Knowledge graph JSON parse failed — persisting summary only', err);
+      }
+    }
+
+    // Strip the tag from the persisted summary text so users never see the raw JSON.
+    const summaryText = rawText.replace(/<<<KNOWLEDGE_GRAPH>>>[\s\S]*?<<<END_KNOWLEDGE_GRAPH>>>/g, '').trim();
+    if (!summaryText) return;
 
     const lastMessageId = deltaMessages[deltaMessages.length - 1]?.id;
     if (!lastMessageId) return;
 
     const { fs: { doc, setDoc, Timestamp }, fb: { db } } = await loadFirebase();
-    await setDoc(
-      doc(db, 'chatSessions', sessionId),
-      {
-        longTermMemory: summary,
-        longTermMemoryCheckpointId: lastMessageId,
-        longTermMemoryUpdatedAt: Timestamp.now()
-      },
-      { merge: true }
-    );
+    const updates: Record<string, any> = {
+      longTermMemory: summaryText,
+      longTermMemoryCheckpointId: lastMessageId,
+      longTermMemoryUpdatedAt: Timestamp.now()
+    };
+    // Only touch the knowledgeGraph field when we successfully parsed one —
+    // avoids clobbering a previously-good graph with null on a flaky response.
+    if (parsedGraph) {
+      updates.knowledgeGraph = parsedGraph;
+    }
+    await setDoc(doc(db, 'chatSessions', sessionId), updates, { merge: true });
   } catch (err) {
     console.error('Long-term memory update failed', err);
   }
