@@ -1,11 +1,40 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
-import { getFirestore } from 'firebase/firestore';
+import { initializeFirestore, persistentLocalCache, persistentMultipleTabManager } from 'firebase/firestore';
 import { getStorage } from 'firebase/storage';
 import firebaseConfig from '@/../firebase-applet-config.json';
 
 const app = initializeApp(firebaseConfig);
-export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
+
+// Phase 9 — IndexedDB-backed persistent cache.
+//
+//  • persistentLocalCache() replaces the default volatile memory cache with a
+//    durable on-disk mirror of every document and query this client subscribes to.
+//    Subsequent workspace mounts hydrate synchronously from IndexedDB, giving
+//    zero-latency UI rendering before the network handshake even begins.
+//
+//  • persistentMultipleTabManager() safely shares the cache across tabs — without
+//    it, only one tab per origin can claim the persistent cache and the rest
+//    silently fall back to memory-only mode.
+//
+//  • onSnapshot listeners automatically emit cached data first, then delta-sync
+//    from the server on reconnect. Offline mutations are queued in IndexedDB and
+//    replay on reconnection. Conflict resolution relies on server validation via
+//    Firestore rules — the live production DB remains the source of truth.
+//
+// initializeFirestore must be called ONCE, before any Firestore read/write. This
+// module is dynamically imported via loadFirebase() (Phase 4) and memoised, so
+// the singleton guarantee holds.
+export const db = initializeFirestore(
+  app,
+  {
+    localCache: persistentLocalCache({
+      tabManager: persistentMultipleTabManager()
+    })
+  },
+  firebaseConfig.firestoreDatabaseId
+);
+
 export const auth = getAuth(app);
 export const storage = getStorage(app, "gs://coolwtf.firebasestorage.app");
 
