@@ -1,12 +1,15 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, lazy, Suspense } from 'react';
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { ChevronUp, ChevronDown, ChevronLeft, ChevronRight, Download, Loader2, Mic, Pencil, Trash2, Terminal, RotateCw } from 'lucide-react';
 import { m } from 'motion/react';
-import Markdown from 'react-markdown';
 import TextareaAutosize from 'react-textarea-autosize';
 import { MessageCopyButton, ActionableCodeBlock } from './ChatUIPrimitives';
+
+// Lazy-load react-markdown — Rollup splits the parser + all its remark/rehype plugins
+// into a separate chunk, keeping them out of the initial application bundle.
+const Markdown = lazy(() => import('react-markdown'));
 
 export function MessageBubble({ msg, user, sessionId, sessions, globalDefaults, isArabic, t, messages, activeLeafId, setActiveLeafId, onEditSubmit, onDelete, onRegenerate, localSearchQuery, isActiveSearchMatch }: any) {
   const [isEditing, setIsEditing] = useState(false);
@@ -190,29 +193,31 @@ export function MessageBubble({ msg, user, sessionId, sessions, globalDefaults, 
                 dir="auto" 
                 className={`markdown-body prose ${msg.role === 'user' ? 'prose-invert prose-headings:text-primary-foreground prose-a:text-primary-foreground' : 'prose-invert'} max-w-none prose-p:my-0 prose-p:leading-relaxed prose-pre:bg-zinc-950 prose-pre:border prose-pre:border-zinc-800 ${msg.role === 'user' && !isExpanded ? 'line-clamp-5 overflow-hidden break-words' : 'break-words'}`}
               >
-                <Markdown
-                  components={{
-                    code({ node, inline, className, children, ...props }: any) {
-                      const rawText = String(children).replace(/\n$/, '');
-                      const meta = node?.data?.meta || '';
-                      const isAntigravity = 
-                        className?.includes('[COPY THIS TO ANTIGRAVITY IDE]') || 
-                        meta.includes('[COPY THIS TO ANTIGRAVITY IDE]') ||
-                        rawText.includes('[COPY THIS TO ANTIGRAVITY IDE]');
-                      
-                      if (!inline && isAntigravity) {
-                        const payload = rawText.replace(/\[COPY THIS TO ANTIGRAVITY IDE\]/g, '').trim();
-                        const currentSession = sessions.find((s: any) => s.id === sessionId);
-                        const targetIde = currentSession?.targetIde || globalDefaults.targetIde;
-                        return <ActionableCodeBlock payload={payload} targetIde={targetIde} userId={user.uid} />;
+                <Suspense fallback={<div className="whitespace-pre-wrap">{content}</div>}>
+                  <Markdown
+                    components={{
+                      code({ node, inline, className, children, ...props }: any) {
+                        const rawText = String(children).replace(/\n$/, '');
+                        const meta = node?.data?.meta || '';
+                        const isAntigravity =
+                          className?.includes('[COPY THIS TO ANTIGRAVITY IDE]') ||
+                          meta.includes('[COPY THIS TO ANTIGRAVITY IDE]') ||
+                          rawText.includes('[COPY THIS TO ANTIGRAVITY IDE]');
+
+                        if (!inline && isAntigravity) {
+                          const payload = rawText.replace(/\[COPY THIS TO ANTIGRAVITY IDE\]/g, '').trim();
+                          const currentSession = sessions.find((s: any) => s.id === sessionId);
+                          const targetIde = currentSession?.targetIde || globalDefaults.targetIde;
+                          return <ActionableCodeBlock payload={payload} targetIde={targetIde} userId={user.uid} />;
+                        }
+
+                        return <code className={className} {...props}>{children}</code>;
                       }
-                      
-                      return <code className={className} {...props}>{children}</code>;
-                    }
-                  }}
-                >
-                  {content}
-                </Markdown>
+                    }}
+                  >
+                    {content}
+                  </Markdown>
+                </Suspense>
               </div>
               {msg.role === 'user' && isOverflowing && (
                 <div className="mt-1 flex justify-start w-full" dir="ltr">

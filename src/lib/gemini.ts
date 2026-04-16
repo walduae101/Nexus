@@ -1,7 +1,25 @@
-import { GoogleGenAI, Type, ThinkingLevel, Modality } from '@google/genai';
 import { IDE_PROFILES } from '@/features/settings/constants';
 
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+// Dynamic loader for @google/genai — Rollup splits this into a separate chunk.
+// The module only loads on first invocation of any chat/image/audio/search helper,
+// keeping the SDK out of the initial application bundle.
+let genaiModulePromise: Promise<typeof import('@google/genai')> | null = null;
+function loadGenAI() {
+  if (!genaiModulePromise) {
+    genaiModulePromise = import('@google/genai');
+  }
+  return genaiModulePromise;
+}
+
+let aiSingletonPromise: Promise<any> | null = null;
+async function getAI() {
+  if (!aiSingletonPromise) {
+    aiSingletonPromise = loadGenAI().then(({ GoogleGenAI }) =>
+      new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY })
+    );
+  }
+  return aiSingletonPromise;
+}
 
 export const SYSTEM_INSTRUCTION = `
 **Role:** The Nexus - An elite AI System Architect, Prompt Engineer, and Technical Translator.
@@ -66,8 +84,9 @@ export async function chatWithNexus(
   settings?: { userLang?: string, ideLang?: string, targetIde?: string, customInstructions?: string, complexityModeName?: string, complexityModeRules?: string, techStackContext?: string, githubRepo?: string, sparksContext?: string, projectSummary?: string, issuesScratchpad?: any[], distilledMemories?: any },
   abortSignal?: AbortSignal
 ) {
+  const [{ ThinkingLevel }, ai] = await Promise.all([loadGenAI(), getAI()]);
   const useThinking = model === 'gemini-3.1-pro-preview';
-  
+
   let dynamicInstruction = SYSTEM_INSTRUCTION;
   if (settings) {
     dynamicInstruction += `\n\n**ACTIVE SETTINGS:**\n`;
@@ -198,6 +217,7 @@ CRITICAL BEHAVIORAL MODULATION:
 }
 
 export async function generateImage(prompt: string, model: 'gemini-3.1-flash-image-preview' | 'gemini-3-pro-image-preview', aspectRatio: string, size: string) {
+  const ai = await getAI();
   const response = await ai.models.generateContent({
     model: model,
     contents: {
@@ -220,6 +240,7 @@ export async function generateImage(prompt: string, model: 'gemini-3.1-flash-ima
 }
 
 export async function analyzeMedia(fileData: string, mimeType: string, prompt: string) {
+  const ai = await getAI();
   const response = await ai.models.generateContent({
     model: 'gemini-3.1-pro-preview',
     contents: {
@@ -233,6 +254,7 @@ export async function analyzeMedia(fileData: string, mimeType: string, prompt: s
 }
 
 export async function transcribeAudio(fileData: string, mimeType: string) {
+  const ai = await getAI();
   const response = await ai.models.generateContent({
     model: 'gemini-3-flash-preview',
     contents: {
@@ -246,6 +268,7 @@ export async function transcribeAudio(fileData: string, mimeType: string) {
 }
 
 export async function searchGrounding(query: string) {
+  const ai = await getAI();
   const response = await ai.models.generateContent({
     model: 'gemini-3-flash-preview',
     contents: query,
@@ -257,6 +280,7 @@ export async function searchGrounding(query: string) {
 }
 
 export async function textToSpeech(text: string, closenessLevel: number = 1) {
+  const [{ Modality }, ai] = await Promise.all([loadGenAI(), getAI()]);
   let sysInstruction = "You are an advanced Text-to-Speech synthesizer. Synthesize the text naturally.";
   if (closenessLevel >= 4) {
       sysInstruction += " CRITICAL PROSODY INSTRUCTION: Apply a warm, slightly lower baseline pitch. Introduce minor, spontaneous fluctuations in delivery speed to mimic human conversational rhythm, and relax strict punctuation pauses.";
@@ -334,6 +358,7 @@ export async function textToSpeech(text: string, closenessLevel: number = 1) {
 }
 
 export async function fastTask(prompt: string) {
+  const ai = await getAI();
   const response = await ai.models.generateContent({
     model: 'gemini-3.1-flash-lite-preview',
     contents: prompt
