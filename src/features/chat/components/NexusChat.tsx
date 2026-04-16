@@ -490,8 +490,13 @@ COMPRESSED OUTPUT:`;
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const fetchedSessions = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       
-      // Sort client-side to handle pending server timestamps
+      // Sort client-side: pinned sessions rise to the top (primary key), then by
+      // updatedAt descending (secondary). Client-side ordering avoids the need
+      // for a Firestore composite index and handles pending server timestamps.
       fetchedSessions.sort((a: any, b: any) => {
+        const aPinned = !!a.isPinned;
+        const bPinned = !!b.isPinned;
+        if (aPinned !== bPinned) return aPinned ? -1 : 1;
         const timeA = a.updatedAt?.toMillis?.() || Date.now();
         const timeB = b.updatedAt?.toMillis?.() || Date.now();
         return timeB - timeA;
@@ -644,6 +649,51 @@ COMPRESSED OUTPUT:`;
       console.error('Failed to update session title', error);
     }
     setEditingSessionId(null);
+  };
+
+  // Phase-18: toggle the `isPinned` flag on a session. Writes run optimistically —
+  // local sessions state flips immediately so the re-sort paints in the same frame
+  // as the user's click. On Firestore rejection we roll back to the previous value.
+  // Intentionally does NOT update `updatedAt` (pinning is a metadata change that
+  // shouldn't rewrite recency order).
+  const togglePinSession = async (id: string) => {
+    const target = sessions.find((s: any) => s.id === id);
+    if (!target) return;
+    const previous = !!target.isPinned;
+    const next = !previous;
+
+    // Optimistic update — flips the flag AND re-runs the sort so the item moves.
+    setSessions(prev => {
+      const updated = prev.map((s: any) => s.id === id ? { ...s, isPinned: next } : s);
+      updated.sort((a: any, b: any) => {
+        const aP = !!a.isPinned;
+        const bP = !!b.isPinned;
+        if (aP !== bP) return aP ? -1 : 1;
+        const tA = a.updatedAt?.toMillis?.() || Date.now();
+        const tB = b.updatedAt?.toMillis?.() || Date.now();
+        return tB - tA;
+      });
+      return updated;
+    });
+
+    try {
+      await updateDoc(doc(db, 'chatSessions', id), { isPinned: next });
+    } catch (error) {
+      console.error('Failed to toggle pin on session', error);
+      // Rollback to the prior value + re-sort.
+      setSessions(prev => {
+        const reverted = prev.map((s: any) => s.id === id ? { ...s, isPinned: previous } : s);
+        reverted.sort((a: any, b: any) => {
+          const aP = !!a.isPinned;
+          const bP = !!b.isPinned;
+          if (aP !== bP) return aP ? -1 : 1;
+          const tA = a.updatedAt?.toMillis?.() || Date.now();
+          const tB = b.updatedAt?.toMillis?.() || Date.now();
+          return tB - tA;
+        });
+        return reverted;
+      });
+    }
   };
 
   const deleteSession = async () => {
@@ -1756,15 +1806,32 @@ Your task is to proactively initiate the conversation.
                     </div>
                   ) : (
                     <div className="flex items-center justify-between gap-2">
-                      <div className="font-medium truncate text-sm">{resolveTitle(session.title)}</div>
+                      <div className="flex items-center gap-1.5 min-w-0 flex-1">
+                        {session.isPinned && (
+                          <Pin
+                            className="w-3 h-3 text-primary shrink-0 fill-current"
+                            aria-label={globalDefaults?.userLang?.startsWith('ar') ? 'مثبّتة' : 'Pinned'}
+                          />
+                        )}
+                        <div className="font-medium truncate text-sm">{resolveTitle(session.title)}</div>
+                      </div>
                       <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                         <DropdownMenu>
                           <DropdownMenuTrigger onClick={(e) => e.stopPropagation()} className="inline-flex items-center justify-center rounded-md h-6 w-6 shrink-0 bg-transparent hover:bg-muted text-muted-foreground hover:text-foreground transition-colors outline-none cursor-pointer">
                             <MoreVertical className="w-4 h-4" />
                           </DropdownMenuTrigger>
                           <DropdownMenuContent onClick={(e) => e.stopPropagation()}>
-                            <DropdownMenuItem className="cursor-pointer opacity-50 cursor-not-allowed">
-                              <Pin className="w-4 h-4 me-2" /> {t('pin_chat')}
+                            <DropdownMenuItem
+                              className="cursor-pointer"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                togglePinSession(session.id);
+                              }}
+                            >
+                              <Pin className={`w-4 h-4 me-2 ${session.isPinned ? 'fill-current text-primary' : ''}`} />
+                              {session.isPinned
+                                ? (globalDefaults?.userLang?.startsWith('ar') ? 'إلغاء التثبيت' : 'Unpin')
+                                : (t('pin_chat') || 'Pin')}
                             </DropdownMenuItem>
                             <DropdownMenuItem 
                               className="cursor-pointer"
