@@ -112,6 +112,80 @@ Keep status="open" even at high confidence — only transition to "resolved" whe
 }
 
 /**
+ * Long-Term Executive Memory updater.
+ *
+ * Generates a high-level executive summary of a session focused on core objectives,
+ * architectural decisions, and context continuity — distinct from the tactical
+ * `projectSummary` that compressChatHistory maintains.
+ *
+ * Supports delta-summarization: if an existing summary is supplied, the LLM is
+ * asked to merge only the un-summarized delta rather than re-read the full feed,
+ * drastically reducing token consumption over long sessions.
+ *
+ * Persists three fields on the session doc:
+ *   - longTermMemory              : the merged executive summary text
+ *   - longTermMemoryCheckpointId  : id of the last message folded in (delta anchor)
+ *   - longTermMemoryUpdatedAt     : server write timestamp (for UI staleness checks)
+ */
+export async function updateLongTermMemory(
+  sessionId: string,
+  existingSummary: string,
+  deltaMessages: Array<{ role: string; content: string; id: string }>
+): Promise<void> {
+  if (!deltaMessages || deltaMessages.length === 0) return;
+
+  const deltaBlock = deltaMessages
+    .map(m => `[${m.role}]: ${(m.content || '').slice(0, 2000)}`)
+    .join('\n\n');
+
+  const prompt = `You are an executive context summarizer for a long-running engineering conversation.
+
+OBJECTIVE: Produce a merged executive summary that folds the NEW CONVERSATION DELTA into the EXISTING SUMMARY.
+
+FOCUS EXCLUSIVELY ON:
+1. CORE OBJECTIVES — what the user is ultimately trying to achieve in this session.
+2. ARCHITECTURAL DECISIONS — system design choices, technology selections, tradeoffs explicitly made.
+3. CONTEXT CONTINUITY — key milestones reached, unresolved threads, dependencies that will matter later.
+
+STRICT RULES:
+- Merge the delta INTO the existing summary — do not just append or list.
+- Omit tactical chatter, code snippets, and transient debugging.
+- Preserve specific identifiers (file paths, commit SHAs, component names) only when they anchor a decision.
+- Target 200–500 words. Use short section headers (Objectives / Decisions / Continuity).
+- Output ONLY the updated summary — no preamble, no meta-commentary, no markdown fences.
+
+EXISTING SUMMARY:
+${existingSummary ? existingSummary : '(none — this is the first summarization pass)'}
+
+NEW CONVERSATION DELTA:
+${deltaBlock}
+
+UPDATED EXECUTIVE SUMMARY:`;
+
+  try {
+    const raw = await fastTask(prompt);
+    const summary = (raw || '').trim();
+    if (!summary) return;
+
+    const lastMessageId = deltaMessages[deltaMessages.length - 1]?.id;
+    if (!lastMessageId) return;
+
+    const { fs: { doc, setDoc, Timestamp }, fb: { db } } = await loadFirebase();
+    await setDoc(
+      doc(db, 'chatSessions', sessionId),
+      {
+        longTermMemory: summary,
+        longTermMemoryCheckpointId: lastMessageId,
+        longTermMemoryUpdatedAt: Timestamp.now()
+      },
+      { merge: true }
+    );
+  } catch (err) {
+    console.error('Long-term memory update failed', err);
+  }
+}
+
+/**
  * Deterministic state transition for a single issue in a session's scratchpad.
  * Reads the current `issuesScratchpad`, mutates the entry with matching `issueId`,
  * and writes the array back with `merge: true`. Reactive `onSnapshot` listeners

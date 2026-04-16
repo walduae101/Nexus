@@ -5,14 +5,14 @@ import { db, handleFirestoreError, OperationType, storage, auth } from '@/lib/fi
 import { signOut } from 'firebase/auth';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { chatWithNexus, generateImage, searchGrounding, textToSpeech, analyzeMedia, transcribeAudio, fastTask } from '@/lib/gemini';
-import { compressChatHistory, getHistoricalContext, getDistilledMemories } from '@/lib/memory';
+import { compressChatHistory, getHistoricalContext, getDistilledMemories, updateLongTermMemory } from '@/lib/memory';
 import { useSessionPresence } from '@/lib/hooks/useSessionPresence';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue, SelectGroup, SelectLabel, SelectSeparator } from '@/components/ui/select';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Card, CardContent } from '@/components/ui/card';
-import { Send, Bot, User as UserIcon, Loader2, Paperclip, X, Image as ImageIcon, Mic, Search, Video, Plus, MessageSquare, Pencil, Check, Trash2, Download, UploadCloud, Play, Settings, Info, FolderSync, Copy, Wand2, Globe, Volume2, MoreVertical, Pin, ChevronUp, ChevronDown, ChevronLeft, ChevronRight, Lightbulb, Sparkles, Terminal, Square, ArrowDown, PanelLeftClose, PanelLeftOpen, LogOut } from 'lucide-react';
+import { Send, Bot, User as UserIcon, Loader2, Paperclip, X, Image as ImageIcon, Mic, Search, Video, Plus, MessageSquare, Pencil, Check, Trash2, Download, UploadCloud, Play, Settings, Info, FolderSync, Copy, Wand2, Globe, Volume2, MoreVertical, Pin, ChevronUp, ChevronDown, ChevronLeft, ChevronRight, Lightbulb, Sparkles, Terminal, Square, ArrowDown, PanelLeftClose, PanelLeftOpen, LogOut, BookText } from 'lucide-react';
 import Markdown from 'react-markdown';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogClose, DialogTrigger } from '@/components/ui/dialog';
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from '@/components/ui/sheet';
@@ -47,6 +47,12 @@ import { InputGhostOverlay } from './InputGhostOverlay';
 // only fetched when the current session actually has a non-empty projectSummary.
 const DistilledMemoryMirror = lazy(() =>
   import('./DistilledMemoryMirror').then(m => ({ default: m.DistilledMemoryMirror }))
+);
+
+// Executive Summary Sidebar — lazy-loaded, only fetched the first time the user
+// opens the sidebar for the current session.
+const ExecutiveSummarySidebar = lazy(() =>
+  import('./ExecutiveSummarySidebar').then(m => ({ default: m.ExecutiveSummarySidebar }))
 );
 
 export const generateSyncPrompt = (userPreferences?: string) => {
@@ -103,6 +109,7 @@ export function NexusChat({ user, isSidebarOpen = true, setIsSidebarOpen }: { us
   const [isLoading, setIsLoading] = useState(false);
   const [isCompressing, setIsCompressing] = useState(false);
   const [ghostSuggestion, setGhostSuggestion] = useState('');
+  const [isSummarySidebarOpen, setIsSummarySidebarOpen] = useState(false);
   const [hasInitialized, setHasInitialized] = useState(false);
   const [isForeshadowing, setIsForeshadowing] = useState(false);
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
@@ -698,6 +705,62 @@ COMPRESSED OUTPUT:`;
     }
     return thread;
   }, [messages, activeLeafId]);
+
+  // Long-Term Executive Memory threshold trigger — fires when the active session's
+  // aggregate message content crosses 5,000 characters, with delta-summarization on
+  // subsequent triggers (only the un-summarized tail is sent to the LLM).
+  //
+  // Gates layered to prevent thrashing:
+  //   • Total-char threshold (5k)
+  //   • Delta must contain ≥4 new messages OR ≥500 new chars (once summary exists)
+  //   • Per-session 5-minute cooldown ref
+  const longTermMemoryGenRef = useRef<Record<string, number>>({});
+  useEffect(() => {
+    if (!sessionId || !user || messages.length === 0) return;
+    const currentSession = sessions.find((s: any) => s.id === sessionId);
+    if (!currentSession) return;
+
+    const totalChars = messages.reduce(
+      (sum: number, m: any) => sum + ((m.content || '').length),
+      0
+    );
+    if (totalChars < 5000) return;
+
+    const existingSummary: string = currentSession.longTermMemory || '';
+    const existingCheckpointId: string | null = currentSession.longTermMemoryCheckpointId || null;
+
+    // Locate delta boundary.
+    let checkpointIdx = -1;
+    if (existingCheckpointId) {
+      checkpointIdx = messages.findIndex((m: any) => m.id === existingCheckpointId);
+    }
+    const deltaMessages = messages.slice(checkpointIdx + 1);
+    const deltaChars = deltaMessages.reduce(
+      (sum: number, m: any) => sum + ((m.content || '').length),
+      0
+    );
+
+    // Significance gate — avoids re-summarizing after every AI turn.
+    if (existingSummary && deltaMessages.length < 4 && deltaChars < 500) return;
+    if (deltaMessages.length === 0) return;
+
+    // Cooldown — 5 min per session.
+    const nowMs = Date.now();
+    if (nowMs - (longTermMemoryGenRef.current[sessionId] ?? 0) < 300_000) return;
+    longTermMemoryGenRef.current[sessionId] = nowMs;
+
+    updateLongTermMemory(
+      sessionId,
+      existingSummary,
+      deltaMessages.map((m: any) => ({
+        role: String(m.role || 'user'),
+        content: String(m.content || ''),
+        id: String(m.id || '')
+      }))
+    ).catch((err) => {
+      console.error('Long-term memory dispatch failed:', err);
+    });
+  }, [sessionId, messages, sessions, user]);
 
   // Distilled Memory freshness check — evaluates whether the current session's
   // projectSummary is stale relative to the most recent interaction and, if so,
@@ -1787,6 +1850,40 @@ Your task is to proactively initiate the conversation.
               </div>
             )}
             <IssuesPanel issues={sessions.find(s => s.id === sessionId)?.issuesScratchpad || []} sessionId={sessionId} />
+            {/* Executive Summary trigger button — always mounted, sidebar chunk is lazy. */}
+            {(() => {
+              const currentSession = sessions.find((s: any) => s.id === sessionId);
+              const hasSummary = !!(currentSession?.longTermMemory && currentSession.longTermMemory.trim().length > 0);
+              const useArabicLayout = !!globalDefaults?.userLang?.startsWith('ar');
+              const updatedAtMs = currentSession?.longTermMemoryUpdatedAt?.toMillis?.() ?? null;
+              return (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => setIsSummarySidebarOpen(true)}
+                    aria-label={useArabicLayout ? 'فتح الملخص التنفيذي' : 'Open executive summary'}
+                    title={useArabicLayout ? 'الملخص التنفيذي' : 'Executive summary'}
+                    className="group relative w-10 h-10 inline-flex items-center justify-center text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 rounded-md"
+                  >
+                    <BookText className={`w-5 h-5 transition-all ${hasSummary ? 'text-primary' : ''}`} aria-hidden="true" />
+                    {hasSummary && (
+                      <span className="absolute top-1.5 end-1.5 w-1.5 h-1.5 rounded-full bg-primary" aria-hidden="true" />
+                    )}
+                  </button>
+                  {isSummarySidebarOpen && (
+                    <Suspense fallback={null}>
+                      <ExecutiveSummarySidebar
+                        isOpen={isSummarySidebarOpen}
+                        onClose={() => setIsSummarySidebarOpen(false)}
+                        summary={currentSession?.longTermMemory || ''}
+                        updatedAt={updatedAtMs ? new Date(updatedAtMs) : null}
+                        isArabic={useArabicLayout}
+                      />
+                    </Suspense>
+                  )}
+                </>
+              );
+            })()}
             <Sheet open={isSparksOpen} onOpenChange={setIsSparksOpen}>
               <SheetTrigger>
                 <div role="button" aria-label="Sparks" className="group relative w-10 h-10 inline-flex items-center justify-center text-muted-foreground hover:text-foreground">
