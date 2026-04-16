@@ -1,5 +1,5 @@
 import { fastTask } from './gemini';
-import { doc, setDoc, serverTimestamp, collection, query, where, orderBy, limit, getDocs } from 'firebase/firestore';
+import { doc, setDoc,  collection, query, where, orderBy, limit, getDocs , Timestamp } from 'firebase/firestore';
 import { db } from './firebase';
 
 export interface Issue {
@@ -52,7 +52,7 @@ CRITICAL RULE: You MUST output ONLY valid JSON using this EXACT schema, with NO 
     await setDoc(doc(db, 'chatSessions', sessionId), {
       projectSummary: result.projectSummary || currentSummary,
       issuesScratchpad: result.issuesScratchpad || currentIssues || [],
-      updatedAt: serverTimestamp()
+      updatedAt: Timestamp.now()
     }, { merge: true });
     } catch (err) {
     console.error('Failed to compress chat history and issues', err);
@@ -115,7 +115,11 @@ export async function getDistilledMemories(userId: string): Promise<any> {
     personal_goals_promises: ''
   };
   try {
-    const q = query(collection(db, `users/${userId}/distilled_emotional_memories`), limit(1));
+    const q = query(
+      collection(db, `users/${userId}/distilled_emotional_memories`),
+      where('userId', '==', userId),
+      limit(1)
+    );
     const snapshot = await getDocs(q);
     if (!snapshot.empty) {
       return snapshot.docs[0].data();

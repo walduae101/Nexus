@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { User } from 'firebase/auth';
-import { collection, query, orderBy, onSnapshot, addDoc, serverTimestamp, doc, setDoc, where, updateDoc, deleteDoc, getDocs, limit } from 'firebase/firestore';
+import { collection, query, orderBy, onSnapshot, addDoc,  doc, setDoc, where, updateDoc, deleteDoc, getDocs, limit , Timestamp } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType, storage, auth } from '@/lib/firebase';
 import { signOut } from 'firebase/auth';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
@@ -176,8 +176,7 @@ export function NexusChat({ user, isSidebarOpen = true, setIsSidebarOpen }: { us
               results.push({
                 sessionId: sId,
                 title: sessions.find((s: any) => s.id === sId)?.title || 'Unknown',
-                matchedSnippet: snippet,
-              });
+                matchedSnippet: snippet});
               break; // Found in this session, move to next
             }
           }
@@ -370,7 +369,7 @@ export function NexusChat({ user, isSidebarOpen = true, setIsSidebarOpen }: { us
     } else {
       await updateDoc(doc(db, 'chatSessions', targetSessionId), {
         ...settingsToUpdate,
-        updatedAt: serverTimestamp()
+        updatedAt: Timestamp.now()
       });
     }
   };
@@ -485,7 +484,7 @@ export function NexusChat({ user, isSidebarOpen = true, setIsSidebarOpen }: { us
     try {
       await updateDoc(doc(db, 'chatSessions', id), {
         title: editTitle.trim(),
-        updatedAt: serverTimestamp()
+        updatedAt: Timestamp.now()
       });
     } catch (error) {
       console.error('Failed to update session title', error);
@@ -634,9 +633,13 @@ Your task is to proactively initiate the conversation.
           await setDoc(newSessionRef, {
             userId: user.uid,
             title: t('new_chat') || 'New Chat',
-            createdAt: serverTimestamp(),
-            updatedAt: serverTimestamp(),
-            ...pendingSettings
+            createdAt: Timestamp.now(),
+            updatedAt: Timestamp.now(),
+            userLang: pendingSettings?.userLang || null,
+            ideLang: pendingSettings?.ideLang || null,
+            targetIde: pendingSettings?.targetIde || null,
+            customInstructions: pendingSettings?.customInstructions || null,
+            complexityMode: pendingSettings?.complexityMode || null
           });
           
           const sysRef = await addDoc(collection(db, `chatSessions/${targetSessionId}/messages`), {
@@ -644,12 +647,12 @@ Your task is to proactively initiate the conversation.
             userId: user.uid,
             role: 'model',
             content: initialString,
-            timestamp: serverTimestamp()
+            timestamp: Timestamp.now()
           });
           
           await updateDoc(doc(db, 'chatSessions', targetSessionId!), {
              activeLeafId: sysRef.id,
-             updatedAt: serverTimestamp()
+             updatedAt: Timestamp.now()
           });
           
           setSessionId(targetSessionId);
@@ -687,7 +690,7 @@ Your task is to proactively initiate the conversation.
           if (newTitle && newTitle.trim()) {
             await updateDoc(doc(db, 'chatSessions', sessionId), {
               title: newTitle.trim(),
-              updatedAt: serverTimestamp()
+              updatedAt: Timestamp.now()
             });
           }
         } catch (error) {
@@ -776,7 +779,7 @@ Your task is to proactively initiate the conversation.
   };
 
   const sendMessage = async (overrideParentId?: string | null, overrideInput?: string, regenerateUserId?: string | null) => {
-    const MAX_FIRESTORE_CHARS = 800000; // ~800KB to leave room for metadata
+    const MAX_FIRESTORE_CHARS = 90000; // ~90KB to strictly stay under 100k database limit
     const isOverride = overrideInput !== undefined;
     let userMessage = isOverride ? overrideInput : input;
     let targetIdePayload = isOverride ? undefined : ideText;
@@ -814,16 +817,20 @@ Your task is to proactively initiate the conversation.
         await setDoc(newSessionRef, {
           userId: user.uid,
           title: t('new_chat') || 'New Chat',
-          createdAt: serverTimestamp(),
-          updatedAt: serverTimestamp(),
-          ...pendingSettings
+          createdAt: Timestamp.now(),
+          updatedAt: Timestamp.now(),
+            userLang: pendingSettings?.userLang || null,
+            ideLang: pendingSettings?.ideLang || null,
+            targetIde: pendingSettings?.targetIde || null,
+            customInstructions: pendingSettings?.customInstructions || null,
+            complexityMode: pendingSettings?.complexityMode || null
         });
         await new Promise(r => setTimeout(r, 400)); // Delay listener attachment to allow strict firestore rule propagations
         setSessionId(targetSessionId);
         setPendingSettings({});
       } else {
         await updateDoc(doc(db, 'chatSessions', targetSessionId), {
-          updatedAt: serverTimestamp()
+          updatedAt: Timestamp.now()
         });
       }
 
@@ -868,7 +875,7 @@ Your task is to proactively initiate the conversation.
           setActiveLeafId(activeUserMsgId);
           await updateDoc(doc(db, 'chatSessions', targetSessionId!), {
              activeLeafId: activeUserMsgId,
-             updatedAt: serverTimestamp()
+             updatedAt: Timestamp.now()
           });
       } else {
           const userDocRef = doc(collection(db, `chatSessions/${targetSessionId}/messages`));
@@ -889,7 +896,7 @@ Your task is to proactively initiate the conversation.
             role: 'user',
             content: safeUserContent,
             idePayload: safeIdePayload,
-            timestamp: serverTimestamp(),
+            timestamp: Timestamp.now(),
             parentId: userParentId,
             ...(uploadedUrls.length > 0 ? { attachments: uploadedUrls } : {})
           });
@@ -897,7 +904,7 @@ Your task is to proactively initiate the conversation.
           setActiveLeafId(activeUserMsgId);
           await updateDoc(doc(db, 'chatSessions', targetSessionId!), {
              activeLeafId: activeUserMsgId,
-             updatedAt: serverTimestamp()
+             updatedAt: Timestamp.now()
           });
       }
       
@@ -1089,12 +1096,12 @@ Your task is to proactively initiate the conversation.
                     role: 'system',
                     content: 'Network Interruption: The AI stream was unexpectedly disconnected. Partial response preserved.',
                     parentId: activeUserMsgId,
-                    timestamp: serverTimestamp()
+                    timestamp: Timestamp.now()
                   });
                   setActiveLeafId(sysRef.id);
                   await updateDoc(doc(db, 'chatSessions', targetSessionId!), {
                     activeLeafId: sysRef.id,
-                    updatedAt: serverTimestamp()
+                    updatedAt: Timestamp.now()
                   });
                 } catch(e) {
                   console.error('Failed to log system error to DB', e);
@@ -1133,7 +1140,7 @@ Your task is to proactively initiate the conversation.
           role: 'model',
           content: cleanResponse || "",
           parentId: activeUserMsgId,
-          timestamp: serverTimestamp()
+          timestamp: Timestamp.now()
         });
 
         setActiveLeafId(aiDocRefResult.id);
@@ -1143,7 +1150,7 @@ Your task is to proactively initiate the conversation.
 
         await updateDoc(doc(db, 'chatSessions', targetSessionId!), {
           activeLeafId: aiDocRefResult.id,
-          updatedAt: serverTimestamp()
+          updatedAt: Timestamp.now()
         });
         
         const currentCount = messages.length + 2;
@@ -1181,7 +1188,7 @@ Your task is to proactively initiate the conversation.
         role: 'model',
         content: cleanResponse || "",
         parentId: activeUserMsgId,
-        timestamp: serverTimestamp(),
+        timestamp: Timestamp.now(),
         ...(attachmentUrl ? { attachmentUrl, attachmentType } : {})
       });
 
@@ -1189,7 +1196,7 @@ Your task is to proactively initiate the conversation.
 
       await updateDoc(doc(db, 'chatSessions', targetSessionId!), {
         activeLeafId: aiNonStreamRef.id,
-        updatedAt: serverTimestamp()
+        updatedAt: Timestamp.now()
       });
 
       const currentCount = messages.length + 2;
@@ -1217,7 +1224,7 @@ Your task is to proactively initiate the conversation.
           userId: user.uid,
           role: 'system',
           content: 'Error: Failed to process request.',
-          timestamp: serverTimestamp()
+          timestamp: Timestamp.now()
         });
         
         setActiveLeafId(sysRef.id);
@@ -1256,8 +1263,8 @@ Your task is to proactively initiate the conversation.
         await setDoc(newSessionRef, {
           userId: user.uid,
           title: t('sync_session_title') || 'Project Synchronization',
-          createdAt: serverTimestamp(),
-          updatedAt: serverTimestamp()
+          createdAt: Timestamp.now(),
+          updatedAt: Timestamp.now()
         });
         setSessionId(targetSessionId);
       }
@@ -1270,7 +1277,7 @@ Your task is to proactively initiate the conversation.
         userId: user.uid,
         role: 'model',
         content: formattedPayload,
-        timestamp: serverTimestamp(),
+        timestamp: Timestamp.now(),
         parentId: activeLeafId
       });
 
@@ -1278,7 +1285,7 @@ Your task is to proactively initiate the conversation.
 
       await updateDoc(doc(db, 'chatSessions', targetSessionId!), {
         activeLeafId: aiMsgRef.id,
-        updatedAt: serverTimestamp(),
+        updatedAt: Timestamp.now(),
         ...(!sessionId ? { title: t('sync_session_title') || 'Project Synchronization' } : {})
       });
       
