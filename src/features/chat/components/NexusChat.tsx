@@ -533,7 +533,16 @@ export function NexusChat({ user, isSidebarOpen = true, setIsSidebarOpen }: { us
     const unsubscribe = onSnapshot(q, (snapshot) => {
       setMessages(prev => {
         const firestoreMessages = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })).reverse();
-        const optimisticMessages = prev.filter(m => m.id && m.id.toString().startsWith('temp-'));
+        const firestoreIds = new Set(firestoreMessages.map((m: any) => m.id));
+        // Preserve both kinds of local-only messages across snapshot replays:
+        //   1) `temp-*` placeholders used for in-flight file uploads
+        //   2) `_optimistic` messages written with their real Firestore ID, kept
+        //      until the server snapshot echoes them back (prevents flicker if
+        //      the listener re-subscribes before our write has propagated)
+        const optimisticMessages = prev.filter((m: any) =>
+          (m.id && m.id.toString().startsWith('temp-')) ||
+          (m._optimistic && !firestoreIds.has(m.id))
+        );
         return [...firestoreMessages, ...optimisticMessages];
       });
     }, (error) => {
@@ -879,7 +888,7 @@ Your task is to proactively initiate the conversation.
       } else {
           const userDocRef = doc(collection(db, `chatSessions/${targetSessionId}/messages`));
           activeUserMsgId = userDocRef.id;
-          
+
           let safeUserContent = userMessage || (currentSelectedFiles.length > 0 ? `[Uploaded ${currentSelectedFiles.length} file(s)]` : '');
           if (safeUserContent.length > MAX_FIRESTORE_CHARS) {
               safeUserContent = safeUserContent.substring(0, MAX_FIRESTORE_CHARS) + '\n\n[SYSTEM WARNING: Input truncated. Exceeded 1MB database limit.]';
@@ -889,7 +898,7 @@ Your task is to proactively initiate the conversation.
               safeIdePayload = safeIdePayload.substring(0, MAX_FIRESTORE_CHARS) + '\n\n[SYSTEM WARNING: IDE Payload truncated. Exceeded 1MB database limit.]';
           }
 
-          await setDoc(userDocRef, {
+          const userMessageData: any = {
             sessionId: targetSessionId,
             userId: user.uid,
             role: 'user',
@@ -898,13 +907,37 @@ Your task is to proactively initiate the conversation.
             timestamp: Timestamp.now(),
             parentId: userParentId,
             ...(uploadedUrls.length > 0 ? { attachments: uploadedUrls } : {})
-          });
-          
-          setActiveLeafId(activeUserMsgId);
-          await updateDoc(doc(db, 'chatSessions', targetSessionId!), {
-             activeLeafId: activeUserMsgId,
-             updatedAt: Timestamp.now()
-          });
+          };
+
+          if (currentSelectedFiles.length > 0) {
+              // File-upload path: a `temp-*` placeholder is already shown (line ~844) and
+              // awaiting the writes lets the temp→real transition happen without a visual gap
+              // once the real message arrives via onSnapshot.
+              await setDoc(userDocRef, userMessageData);
+              setActiveLeafId(activeUserMsgId);
+              await updateDoc(doc(db, 'chatSessions', targetSessionId!), {
+                 activeLeafId: activeUserMsgId,
+                 updatedAt: Timestamp.now()
+              });
+          } else {
+              // Text-only path: optimistic UI. Inject the message into local state with its
+              // real Firestore ID so the DOM updates in the same frame as the user's send
+              // action (zero perceived latency). Persistence runs fire-and-forget; on failure
+              // the optimistic entry is spliced out to restore the last server-confirmed view.
+              setMessages(prev => [...prev, { id: activeUserMsgId, _optimistic: true, ...userMessageData }]);
+              setActiveLeafId(activeUserMsgId);
+
+              Promise.all([
+                setDoc(userDocRef, userMessageData),
+                updateDoc(doc(db, 'chatSessions', targetSessionId!), {
+                   activeLeafId: activeUserMsgId,
+                   updatedAt: Timestamp.now()
+                })
+              ]).catch((err) => {
+                console.error('Failed to persist user message — rolling back optimistic insert:', err);
+                setMessages(prev => prev.filter(m => m.id !== activeUserMsgId));
+              });
+          }
       }
       
       if (currentSelectedFiles.length > 0) {
