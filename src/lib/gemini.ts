@@ -195,7 +195,7 @@ CRITICAL: You MUST mimic the exact structure, brevity, and format of the Nexus r
   }
 
   if (settings?.longTermMemory) {
-    dynamicInstruction += `\n\n[EXECUTIVE CONTEXT — LONG-TERM SESSION MEMORY]:\nThe following is a durable executive-level summary of this session's strategic objectives, architectural decisions, and continuity. Use it to keep your response aligned with the user's higher-order goals, not just the immediately preceding turn.\n\n${settings.longTermMemory}\n\n`;
+    dynamicInstruction += `\n\n[ARCHIVED CONVERSATION STATE — BEYOND ACTIVE WINDOW]:\nThe history array in this request is a sliding window of the most recent turns. Earlier turns have been rolled out of the window but are preserved below as an executive-level summary of the strategic objectives, architectural decisions, variables, and continuity from the archived portion of this session. Treat this as authoritative memory for any decision or commitment that preceded the visible history array. Never claim to "not remember" something that appears here.\n\n${settings.longTermMemory}\n\n`;
   }
 
   if (settings?.issuesScratchpad && settings.issuesScratchpad.length > 0) {

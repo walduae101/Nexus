@@ -49,6 +49,13 @@ import { NextActionPill } from './NextActionPill';
 // the streamed display text and the persisted message content.
 const NEXT_ACTION_REGEX = /<<<NEXT_ACTION>>>([\s\S]*?)<<<END_NEXT_ACTION>>>/;
 
+// Phase-19 Sliding Window — the outbound Gemini history payload is capped to
+// this many recent turns. The UI and Firestore retain the full thread; only the
+// network transmission is trimmed. Context that falls outside this window is
+// covered by the Executive Summary (Phase 14) injected as "Archived
+// Conversation State" in the system prompt (Phase 15 injection path).
+const SLIDING_WINDOW_SIZE = 20;
+
 // Distilled Memory Mirror — lazy-loaded. Rollup emits it as its own chunk that is
 // only fetched when the current session actually has a non-empty projectSummary.
 const DistilledMemoryMirror = lazy(() =>
@@ -797,7 +804,10 @@ COMPRESSED OUTPUT:`;
       (sum: number, m: any) => sum + ((m.content || '').length),
       0
     );
-    if (totalChars < 5000) return;
+    // Phase-19: trigger on EITHER scale (5k+ chars) OR depth (messages beyond
+    // the sliding window). This guarantees the Executive Summary keeps up as
+    // turns roll off the outbound Gemini payload, so nothing is ever lost.
+    if (totalChars < 5000 && messages.length <= SLIDING_WINDOW_SIZE) return;
 
     const existingSummary: string = currentSession.longTermMemory || '';
     const existingCheckpointId: string | null = currentSession.longTermMemoryCheckpointId || null;
@@ -1328,10 +1338,19 @@ Your task is to proactively initiate the conversation.
             currentThread = thread;
         }
 
-        const history = currentThread.map(m => ({
+        const fullHistory = currentThread.map(m => ({
           role: m.role === 'model' ? 'model' : 'user',
           parts: [{ text: m.content }]
         })) as { role: 'user' | 'model', parts: { text: string }[] }[];
+
+        // Phase-19: apply the sliding window right before the transmit. In-memory
+        // only — `currentThread` / `messages` / Firestore are untouched. Anything
+        // that falls out of the tail is reconstructed for the LLM from the
+        // Executive Summary that ships as "Archived Conversation State" in the
+        // dynamically-injected system prompt.
+        const history = fullHistory.length > SLIDING_WINDOW_SIZE
+          ? fullHistory.slice(-SLIDING_WINDOW_SIZE)
+          : fullHistory;
 
         const currentSession = sessions.find(s => s.id === targetSessionId);
         const activeSettingsData = currentSession || pendingSettings;
