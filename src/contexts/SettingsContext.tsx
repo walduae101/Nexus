@@ -1,9 +1,24 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import { collection, query, onSnapshot, doc, setDoc, deleteDoc, addDoc } from 'firebase/firestore';
-import { db, handleFirestoreError, OperationType } from '@/lib/firebase';
-import { User } from 'firebase/auth';
+import type { User } from 'firebase/auth';
 
 import { SavedItem, SavedInstruction, CustomMode, IDE_PROFILES, GlobalDefaults, PREMADE_MODES, DEFAULT_IDES, DEFAULT_LANGUAGES } from '@/features/settings/constants';
+
+// Module-level cached loader for Firebase — triggers at most one network fetch for
+// firestore + the local firebase init wrapper, regardless of how many context methods run.
+let firebasePromise: Promise<{
+  fs: typeof import('firebase/firestore'),
+  fb: typeof import('@/lib/firebase'),
+}> | null = null;
+
+function loadFirebase() {
+  if (!firebasePromise) {
+    firebasePromise = Promise.all([
+      import('firebase/firestore'),
+      import('@/lib/firebase'),
+    ]).then(([fs, fb]) => ({ fs, fb }));
+  }
+  return firebasePromise;
+}
 
 interface SettingsContextType {
   savedLanguages: SavedItem[];
@@ -76,90 +91,109 @@ export const SettingsProvider: React.FC<{ user: User | null; children: React.Rea
 
   useEffect(() => {
     if (!user) return;
+    let cancelled = false;
+    let unsubs: Array<() => void> = [];
+    (async () => {
+      const { fs, fb } = await loadFirebase();
+      if (cancelled) return;
+      const { collection, onSnapshot, doc } = fs;
+      const { db, handleFirestoreError, OperationType } = fb;
 
-    const langsRef = collection(db, `users/${user.uid}/saved_languages`);
-    const unsubLangs = onSnapshot(langsRef, (snapshot) => {
-      const fetchedLangs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as SavedItem));
-      const defaultLangs: SavedItem[] = DEFAULT_LANGUAGES.map(lang => ({ id: `default-${lang.value}`, name: lang.name, value: lang.value, isDefault: true }));
-      setSavedLanguages([...defaultLangs, ...fetchedLangs]);
-    }, (error) => handleFirestoreError(error, OperationType.GET, `users/${user.uid}/saved_languages`));
+      const langsRef = collection(db, `users/${user.uid}/saved_languages`);
+      const unsubLangs = onSnapshot(langsRef, (snapshot) => {
+        const fetchedLangs = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as SavedItem));
+        const defaultLangs: SavedItem[] = DEFAULT_LANGUAGES.map(lang => ({ id: `default-${lang.value}`, name: lang.name, value: lang.value, isDefault: true }));
+        setSavedLanguages([...defaultLangs, ...fetchedLangs]);
+      }, (error) => handleFirestoreError(error, OperationType.GET, `users/${user.uid}/saved_languages`));
 
-    const idesRef = collection(db, `users/${user.uid}/saved_ides`);
-    const unsubIdes = onSnapshot(idesRef, (snapshot) => {
-      const fetchedIdes = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as SavedItem));
-      const defaultIdes: SavedItem[] = DEFAULT_IDES.map(ide => ({ id: `default-${ide.toLowerCase().replace(/\s+/g, '-')}`, name: ide, value: ide, isDefault: true }));
-      setSavedIdes([...defaultIdes, ...fetchedIdes]);
-    }, (error) => handleFirestoreError(error, OperationType.GET, `users/${user.uid}/saved_ides`));
+      const idesRef = collection(db, `users/${user.uid}/saved_ides`);
+      const unsubIdes = onSnapshot(idesRef, (snapshot) => {
+        const fetchedIdes = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as SavedItem));
+        const defaultIdes: SavedItem[] = DEFAULT_IDES.map(ide => ({ id: `default-${ide.toLowerCase().replace(/\s+/g, '-')}`, name: ide, value: ide, isDefault: true }));
+        setSavedIdes([...defaultIdes, ...fetchedIdes]);
+      }, (error) => handleFirestoreError(error, OperationType.GET, `users/${user.uid}/saved_ides`));
 
-    const instRef = collection(db, `users/${user.uid}/saved_instructions`);
-    const unsubInst = onSnapshot(instRef, (snapshot) => {
-      setSavedInstructions(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as SavedInstruction)));
-    }, (error) => handleFirestoreError(error, OperationType.GET, `users/${user.uid}/saved_instructions`));
+      const instRef = collection(db, `users/${user.uid}/saved_instructions`);
+      const unsubInst = onSnapshot(instRef, (snapshot) => {
+        setSavedInstructions(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as SavedInstruction)));
+      }, (error) => handleFirestoreError(error, OperationType.GET, `users/${user.uid}/saved_instructions`));
 
-    const modesRef = collection(db, `users/${user.uid}/custom_modes`);
-    const unsubModes = onSnapshot(modesRef, (snapshot) => {
-      const fetchedModes = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as CustomMode));
-      setCustomModes([...PREMADE_MODES, ...fetchedModes]);
-    }, (error) => handleFirestoreError(error, OperationType.GET, `users/${user.uid}/custom_modes`));
+      const modesRef = collection(db, `users/${user.uid}/custom_modes`);
+      const unsubModes = onSnapshot(modesRef, (snapshot) => {
+        const fetchedModes = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as CustomMode));
+        setCustomModes([...PREMADE_MODES, ...fetchedModes]);
+      }, (error) => handleFirestoreError(error, OperationType.GET, `users/${user.uid}/custom_modes`));
 
-    const defaultsRef = doc(db, `users/${user.uid}/global_defaults/default`);
-    const unsubDefaults = onSnapshot(defaultsRef, (docSnap) => {
-      if (docSnap.exists()) {
-        const fetchedData = docSnap.data() as GlobalDefaults;
-        setGlobalDefaults(prev => {
-          const merged = { ...prev, ...fetchedData };
-          localStorage.setItem('nexus_user_settings', JSON.stringify(merged));
-          return merged;
-        });
+      const defaultsRef = doc(db, `users/${user.uid}/global_defaults/default`);
+      const unsubDefaults = onSnapshot(defaultsRef, (docSnap) => {
+        if (docSnap.exists()) {
+          const fetchedData = docSnap.data() as GlobalDefaults;
+          setGlobalDefaults(prev => {
+            const merged = { ...prev, ...fetchedData };
+            localStorage.setItem('nexus_user_settings', JSON.stringify(merged));
+            return merged;
+          });
+        }
+      }, (error) => handleFirestoreError(error, OperationType.GET, `users/${user.uid}/global_defaults/default`));
+
+      if (cancelled) {
+        // Component unmounted between the await and here — tear down immediately.
+        unsubLangs(); unsubIdes(); unsubInst(); unsubModes(); unsubDefaults();
+        return;
       }
-    }, (error) => handleFirestoreError(error, OperationType.GET, `users/${user.uid}/global_defaults/default`));
-
+      unsubs = [unsubLangs, unsubIdes, unsubInst, unsubModes, unsubDefaults];
+    })();
     return () => {
-      unsubLangs();
-      unsubIdes();
-      unsubInst();
-      unsubModes();
-      unsubDefaults();
+      cancelled = true;
+      unsubs.forEach(u => u());
     };
   }, [user]);
 
   const addLanguage = async (name: string, value: string) => {
     if (!user) return;
+    const { fs: { addDoc, collection }, fb: { db } } = await loadFirebase();
     await addDoc(collection(db, `users/${user.uid}/saved_languages`), { name, value });
   };
 
   const deleteLanguage = async (id: string) => {
     if (!user) return;
+    const { fs: { deleteDoc, doc }, fb: { db } } = await loadFirebase();
     await deleteDoc(doc(db, `users/${user.uid}/saved_languages/${id}`));
   };
 
   const addIde = async (name: string, value: string) => {
     if (!user) return;
+    const { fs: { addDoc, collection }, fb: { db } } = await loadFirebase();
     await addDoc(collection(db, `users/${user.uid}/saved_ides`), { name, value });
   };
 
   const deleteIde = async (id: string) => {
     if (!user) return;
+    const { fs: { deleteDoc, doc }, fb: { db } } = await loadFirebase();
     await deleteDoc(doc(db, `users/${user.uid}/saved_ides/${id}`));
   };
 
   const addInstruction = async (title: string, content: string) => {
     if (!user) return;
+    const { fs: { addDoc, collection }, fb: { db } } = await loadFirebase();
     await addDoc(collection(db, `users/${user.uid}/saved_instructions`), { title, content });
   };
 
   const deleteInstruction = async (id: string) => {
     if (!user) return;
+    const { fs: { deleteDoc, doc }, fb: { db } } = await loadFirebase();
     await deleteDoc(doc(db, `users/${user.uid}/saved_instructions/${id}`));
   };
 
   const addCustomMode = async (name: string, rules: string) => {
     if (!user) return;
+    const { fs: { addDoc, collection }, fb: { db } } = await loadFirebase();
     await addDoc(collection(db, `users/${user.uid}/custom_modes`), { name, rules });
   };
 
   const deleteCustomMode = async (id: string) => {
     if (!user) return;
+    const { fs: { deleteDoc, doc }, fb: { db } } = await loadFirebase();
     await deleteDoc(doc(db, `users/${user.uid}/custom_modes/${id}`));
   };
 
@@ -169,9 +203,10 @@ export const SettingsProvider: React.FC<{ user: User | null; children: React.Rea
       localStorage.setItem('nexus_user_settings', JSON.stringify(updated));
       return updated;
     });
-    
+
     if (!user) return;
     try {
+      const { fs: { setDoc, doc }, fb: { db } } = await loadFirebase();
       await setDoc(doc(db, `users/${user.uid}/global_defaults/default`), defaults, { merge: true });
     } catch (e) {
       console.error("Failed to sync defaults to Cloud:", e);

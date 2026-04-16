@@ -1,6 +1,21 @@
 import { fastTask } from './gemini';
-import { doc, setDoc, getDoc, collection, query, where, orderBy, limit, getDocs , Timestamp } from 'firebase/firestore';
-import { db } from './firebase';
+
+// Module-level cached loader — triggers at most one network fetch for
+// firestore + firebase init, regardless of how many helpers run.
+let firebasePromise: Promise<{
+  fs: typeof import('firebase/firestore'),
+  fb: typeof import('./firebase'),
+}> | null = null;
+
+function loadFirebase() {
+  if (!firebasePromise) {
+    firebasePromise = Promise.all([
+      import('firebase/firestore'),
+      import('./firebase'),
+    ]).then(([fs, fb]) => ({ fs, fb }));
+  }
+  return firebasePromise;
+}
 
 export interface Issue {
   id: string;
@@ -80,6 +95,7 @@ Keep status="open" even at high confidence — only transition to "resolved" whe
     const droppedOpen = previousIssues.filter(i => i.status === 'open' && !llmIds.has(i.id));
     const reconciledIssues: Issue[] = [...llmIssues, ...droppedResolved, ...droppedOpen];
 
+    const { fs: { doc, setDoc, Timestamp }, fb: { db } } = await loadFirebase();
     await setDoc(doc(db, 'chatSessions', sessionId), {
       projectSummary: result.projectSummary || currentSummary,
       issuesScratchpad: reconciledIssues,
@@ -102,6 +118,7 @@ export async function setIssueStatus(
   status: 'open' | 'resolved'
 ): Promise<void> {
   try {
+    const { fs: { doc, getDoc, setDoc, Timestamp }, fb: { db } } = await loadFirebase();
     const sessionRef = doc(db, 'chatSessions', sessionId);
     const snap = await getDoc(sessionRef);
     const current: Issue[] = (snap.data()?.issuesScratchpad as Issue[]) || [];
@@ -126,8 +143,9 @@ export async function setIssueStatus(
 
 export async function getHistoricalContext(userId: string, excludeSessionId: string | null = null, daysWindow: number = 7): Promise<string> {
   try {
+    const { fs: { collection, query, where, orderBy, limit, getDocs }, fb: { db } } = await loadFirebase();
     const windowStartMs = Date.now() - (daysWindow * 24 * 60 * 60 * 1000);
-    
+
     // Abstracted Historical Data Retrieval Engine
     // Construct compound query targeting historical sessions
     const sessionsQuery = query(
@@ -180,6 +198,7 @@ export async function getDistilledMemories(userId: string): Promise<any> {
     personal_goals_promises: ''
   };
   try {
+    const { fs: { collection, query, where, limit, getDocs }, fb: { db } } = await loadFirebase();
     const q = query(
       collection(db, `users/${userId}/distilled_emotional_memories`),
       where('userId', '==', userId),
