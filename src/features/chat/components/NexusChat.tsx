@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo, lazy, Suspense } from 'react';
+import { useState, useEffect, useRef, useMemo, lazy, Suspense, startTransition } from 'react';
 import { User } from 'firebase/auth';
 import { collection, query, orderBy, onSnapshot, addDoc,  doc, setDoc, where, updateDoc, deleteDoc, getDocs, limit , Timestamp } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType, storage, auth } from '@/lib/firebase';
@@ -117,6 +117,13 @@ export function NexusChat({ user, isSidebarOpen = true, setIsSidebarOpen }: { us
   const [ghostSuggestion, setGhostSuggestion] = useState('');
   const [isSummarySidebarOpen, setIsSummarySidebarOpen] = useState(false);
   const [nextActionSuggestion, setNextActionSuggestion] = useState<string | null>(null);
+
+  // Phase-17 Snapshot Guard — holds the sessionId whose AI response is actively
+  // streaming. While non-null and equal to the messages-listener's sessionId,
+  // the onSnapshot reconciler defers state overrides so multi-tab IndexedDB
+  // fires don't clobber the in-flight assistant message. Cleared on stream
+  // completion / error / abort.
+  const streamingSessionIdRef = useRef<string | null>(null);
   const [hasInitialized, setHasInitialized] = useState(false);
   const [isForeshadowing, setIsForeshadowing] = useState(false);
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
@@ -679,6 +686,15 @@ COMPRESSED OUTPUT:`;
     }
     const q = query(collection(db, `chatSessions/${sessionId}/messages`), orderBy('timestamp', 'desc'), limit(messageLimit));
     const unsubscribe = onSnapshot(q, (snapshot) => {
+      // Phase-17 Snapshot Guard: while a stream is actively writing to this
+      // session's messages (local only, not yet committed), any incoming
+      // snapshot would risk clobbering the partial assistant message — most
+      // often from the IndexedDB multi-tab cache sharing enabled in Phase 9.
+      // We defer reconciliation until the stream commits its final document,
+      // at which point the ref clears and the next snapshot lands normally.
+      if (streamingSessionIdRef.current === sessionId) {
+        return;
+      }
       setMessages(prev => {
         const firestoreMessages = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })).reverse();
         const firestoreIds = new Set(firestoreMessages.map((m: any) => m.id));
@@ -1333,44 +1349,34 @@ Your task is to proactively initiate the conversation.
         setMessages(prev => [...prev, { id: aiMsgId, role: 'model', content: '', timestamp: null, parentId: activeUserMsgId, isGenerating: true }]);
         setActiveLeafId(aiMsgId);
 
-        let pendingBuffer = "";
-        let displayedText = "";
-        let isNetworkDone = false;
+        // Phase-17: engage the snapshot guard for this session — onSnapshot
+        // reconciler will now defer until we commit the final doc and clear it.
+        streamingSessionIdRef.current = targetSessionId!;
 
-        const flushInterval = setInterval(() => {
-          if (pendingBuffer.length > 0) {
-            const charsToPull = pendingBuffer.substring(0, 3);
-            pendingBuffer = pendingBuffer.substring(3);
-            displayedText += charsToPull;
-
-            // Strip the NEXT_ACTION tag (and anything after it) from the text
-            // the user sees during streaming. The tag always sits at the end of
-            // the response per the Phase-15 directive — splitting on the opening
-            // marker cleanly hides it the moment it starts arriving.
-            const visibleText = displayedText.split('<<<NEXT_ACTION>>>')[0];
-
-            setMessages(prevMessages =>
-              prevMessages.map(msg =>
-                msg.id === aiMsgId ? { ...msg, content: visibleText } : msg
-              )
-            );
-          } else if (isNetworkDone) {
-            clearInterval(flushInterval);
-          }
-        }, 15);
-
+        // Phase-17: unthrottled streaming. Previous typewriter (3 chars / 15 ms
+        // setInterval) capped visible velocity at ~200 chars/s regardless of how
+        // fast the network delivered. We now flush each network chunk straight
+        // into state, wrapped in startTransition so React's concurrent scheduler
+        // can prioritize input/frame work above typing-effect repaints.
         if (stream) {
           try {
             for await (const chunk of stream) {
               if (chunk.text) {
                 fullResponse += chunk.text;
-                pendingBuffer += chunk.text;
+                const visibleText = fullResponse.split('<<<NEXT_ACTION>>>')[0];
+                startTransition(() => {
+                  setMessages(prevMessages =>
+                    prevMessages.map(msg =>
+                      msg.id === aiMsgId ? { ...msg, content: visibleText } : msg
+                    )
+                  );
+                });
               }
             }
           } catch (error: any) {
             if (error.name === 'AbortError' || error.message?.includes('abort') || error.message?.toLowerCase().includes('cancelled')) {
               console.log('Stream stopped by user.');
-              setMessages(prev => prev.map(msg => 
+              setMessages(prev => prev.map(msg =>
                 msg.id === aiMsgId ? { ...msg, isGenerating: false } : msg
               ));
             } else {
@@ -1397,22 +1403,15 @@ Your task is to proactively initiate the conversation.
             }
           } finally {
             abortControllerRef.current = null;
-            isNetworkDone = true;
+            // Release the snapshot guard on any stream-path exit so the listener
+            // resumes reconciliation. Success path re-sets `_optimistic` locally
+            // a few lines down; the guard release is safe either way.
+            streamingSessionIdRef.current = null;
           }
         } else {
           abortControllerRef.current = null;
-          isNetworkDone = true;
+          streamingSessionIdRef.current = null;
         }
-
-        // Suspend the main async function until the typewriter completely drains its buffer to UI
-        await new Promise<void>((resolve) => {
-          const checkDrain = setInterval(() => {
-            if (isNetworkDone && pendingBuffer.length === 0) {
-              clearInterval(checkDrain);
-              resolve();
-            }
-          }, 30);
-        });
 
         const needsImmediateSync = fullResponse.includes('[SYNC_SCRATCHPAD]');
         // Extract the Phase-15 Next Action tag before stripping it from the user-
@@ -1444,8 +1443,21 @@ Your task is to proactively initiate the conversation.
 
         setActiveLeafId(aiDocRefResult.id);
 
-        // Clean up the optimistic streaming message
-        setMessages(prev => prev.filter(m => m.id !== aiMsgId));
+        // Phase-17: Re-key the temp streaming message to the real Firestore ID in
+        // a single setMessages pass. The `_optimistic: true` flag keeps the entry
+        // through any snapshot reconciliations that race in before Firestore's
+        // listener delivers the canonical version (id-matched, so the optimistic
+        // is naturally dropped once firestoreIds contains it).
+        setMessages(prev => prev.map(m => m.id === aiMsgId ? {
+          id: aiDocRefResult.id,
+          sessionId: targetSessionId,
+          userId: user.uid,
+          role: 'model',
+          content: cleanResponse || "",
+          parentId: activeUserMsgId,
+          timestamp: Timestamp.now(),
+          _optimistic: true
+        } : m));
 
         await updateDoc(doc(db, 'chatSessions', targetSessionId!), {
           activeLeafId: aiDocRefResult.id,
@@ -1544,6 +1556,9 @@ Your task is to proactively initiate the conversation.
     } finally {
       setIsLoading(false);
       setProcessingAction(null);
+      // Phase-17 safety net: guarantee the snapshot guard is cleared regardless
+      // of which control-flow path sendMessage exits through.
+      streamingSessionIdRef.current = null;
     }
   };
 
