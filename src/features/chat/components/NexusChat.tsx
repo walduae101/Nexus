@@ -40,6 +40,7 @@ const isArabic = (text: string) => /[\u0600-\u06FF]/.test(text || '');
 import { MessageBubble } from '@/features/chat/components/MessageBubble';
 import { MessageCopyButton, ActionableCodeBlock, RelativeTime, LoadingBubble } from '@/features/chat/components/ChatUIPrimitives';
 import { IssuesPanel } from '@/features/chat/components/IssuesPanel';
+import { InputTelemetry, CompressPayloadButton, MAX_INPUT_CHARS } from './InputTelemetry';
 
 // Distilled Memory Mirror — lazy-loaded. Rollup emits it as its own chunk that is
 // only fetched when the current session actually has a non-empty projectSummary.
@@ -99,6 +100,7 @@ export function NexusChat({ user, isSidebarOpen = true, setIsSidebarOpen }: { us
   const [processingAction, setProcessingAction] = useState<'text' | 'image' | 'tts' | 'search' | null>(null);
   const [model, setModel] = useState<'gemini-3.1-pro-preview' | 'gemini-3-flash-preview' | 'gemini-3.1-flash-lite-preview'>('gemini-3.1-pro-preview');
   const [isLoading, setIsLoading] = useState(false);
+  const [isCompressing, setIsCompressing] = useState(false);
   const [hasInitialized, setHasInitialized] = useState(false);
   const [isForeshadowing, setIsForeshadowing] = useState(false);
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
@@ -333,6 +335,55 @@ export function NexusChat({ user, isSidebarOpen = true, setIsSidebarOpen }: { us
           });
         }
       }
+    }
+  };
+
+  // Payload compression — routes the currently active input (user note OR IDE
+  // payload) through `fastTask` (Gemini Flash-Lite) for lossless semantic
+  // distillation. Overwrites the matching input state with the compressed result.
+  // Fires only on explicit user click from CompressPayloadButton (>80% threshold).
+  const handleCompressPayload = async () => {
+    const source = activeTab === 'user' ? input : ideText;
+    if (!source || source.length < 2000 || isCompressing) return;
+
+    const originalLength = source.length;
+    setIsCompressing(true);
+    try {
+      const compressionPrompt = `You are a lossless semantic compressor for developer prompts.
+
+OBJECTIVE: Rewrite the input text to minimize character count while preserving EVERY piece of meaning, intent, and technical detail.
+
+STRICT RULES:
+1. Preserve ALL file paths, function names, variable names, error messages, stack traces, line numbers, and API endpoints verbatim.
+2. Preserve ALL code snippets inside backticks or code fences verbatim — do not rewrite, shorten, or reformat code.
+3. Preserve the original request/question — never drop a user instruction or directive.
+4. Remove redundant phrasing, filler words, and repeated explanations.
+5. Use dense technical language; assume an expert reader.
+6. Do NOT add commentary, headers, preambles, explanations, or sign-offs.
+7. Output ONLY the compressed text — nothing before or after.
+
+INPUT:
+"""
+${source}
+"""
+
+COMPRESSED OUTPUT:`;
+
+      const compressed = (await fastTask(compressionPrompt))?.trim() || '';
+      // Only accept the result if it's actually shorter — otherwise keep original.
+      if (compressed && compressed.length < originalLength) {
+        if (activeTab === 'user') {
+          setInput(compressed);
+        } else {
+          setIdeText(compressed);
+        }
+      } else {
+        console.warn('[compress] Result was not shorter than original — keeping original.');
+      }
+    } catch (err) {
+      console.error('[compress] Payload compression failed:', err);
+    } finally {
+      setIsCompressing(false);
     }
   };
 
@@ -834,7 +885,7 @@ Your task is to proactively initiate the conversation.
   };
 
   const sendMessage = async (overrideParentId?: string | null, overrideInput?: string, regenerateUserId?: string | null) => {
-    const MAX_FIRESTORE_CHARS = 90000; // ~90KB to strictly stay under 100k database limit
+    const MAX_FIRESTORE_CHARS = MAX_INPUT_CHARS; // shared with InputTelemetry — keeps the limit single-sourced
     const isOverride = overrideInput !== undefined;
     let userMessage = isOverride ? overrideInput : input;
     let targetIdePayload = isOverride ? undefined : ideText;
@@ -2115,6 +2166,25 @@ Your task is to proactively initiate the conversation.
                 </button>
               </div>
             )}
+            {/* Phase 10 — Input telemetry + compress button. The wrapper row only
+                mounts once the active input crosses 50% of the 90k limit; the
+                CompressPayloadButton itself mounts at 80% per its internal gate. */}
+            {(() => {
+              const activeLen = activeTab === 'user' ? input.length : ideText.length;
+              if (activeLen < MAX_INPUT_CHARS * 0.5) return null;
+              const useArabicLayout = !!globalDefaults?.userLang?.startsWith('ar');
+              return (
+                <div className="flex items-center gap-2 mb-2 ms-2" dir={useArabicLayout ? 'rtl' : 'ltr'}>
+                  <InputTelemetry length={activeLen} />
+                  <CompressPayloadButton
+                    length={activeLen}
+                    onClick={handleCompressPayload}
+                    isCompressing={isCompressing}
+                    isArabic={useArabicLayout}
+                  />
+                </div>
+              );
+            })()}
             <form onSubmit={(e) => { e.preventDefault(); sendMessage(); }} className="flex gap-2 items-center w-full">
               <DropdownMenu>
                   <DropdownMenuTrigger className={`inline-flex items-center justify-center rounded-md w-8 h-8 shrink-0 transition-opacity outline-none cursor-pointer hover:bg-muted ${activeTool ? 'text-primary' : 'text-muted-foreground hover:text-foreground'}`}>
