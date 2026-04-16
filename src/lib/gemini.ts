@@ -114,7 +114,7 @@ export async function chatWithNexus(
   history: { role: 'user' | 'model', parts: { text: string }[] }[], 
   message: string, 
   model: 'gemini-3.1-pro-preview' | 'gemini-3-flash-preview' | 'gemini-3.1-flash-lite-preview' = 'gemini-3.1-pro-preview',
-  settings?: { userLang?: string, ideLang?: string, targetIde?: string, customInstructions?: string, complexityModeName?: string, complexityModeRules?: string, techStackContext?: string, githubRepo?: string, sparksContext?: string, projectSummary?: string, issuesScratchpad?: any[], distilledMemories?: any },
+  settings?: { userLang?: string, ideLang?: string, targetIde?: string, customInstructions?: string, complexityModeName?: string, complexityModeRules?: string, techStackContext?: string, githubRepo?: string, sparksContext?: string, projectSummary?: string, longTermMemory?: string, issuesScratchpad?: any[], distilledMemories?: any },
   abortSignal?: AbortSignal
 ) {
   const [{ ThinkingLevel }, ai] = await Promise.all([loadGenAI(), getAI()]);
@@ -194,6 +194,10 @@ CRITICAL: You MUST mimic the exact structure, brevity, and format of the Nexus r
     dynamicInstruction += memoryBlock;
   }
 
+  if (settings?.longTermMemory) {
+    dynamicInstruction += `\n\n[EXECUTIVE CONTEXT — LONG-TERM SESSION MEMORY]:\nThe following is a durable executive-level summary of this session's strategic objectives, architectural decisions, and continuity. Use it to keep your response aligned with the user's higher-order goals, not just the immediately preceding turn.\n\n${settings.longTermMemory}\n\n`;
+  }
+
   if (settings?.issuesScratchpad && settings.issuesScratchpad.length > 0) {
     const issuesStr = settings.issuesScratchpad.map((i: any) => `[${i.status.toUpperCase()}] ${i.description} (Fixes attempted: ${i.attemptedFixes})`).join('\n');
     dynamicInstruction += `\n\n[KNOWN ISSUES & SCRATCHPAD]:\nReview these active and resolved issues. DO NOT repeat failed approaches.\n${issuesStr}\n\n`;
@@ -231,6 +235,13 @@ CRITICAL BEHAVIORAL MODULATION:
   if (settings?.customInstructions) {
     dynamicLastMile += `\n  6. CUSTOM INSTRUCTIONS: You MUST strictly obey the following user-defined rules: "${settings.customInstructions}"`;
   }
+
+  dynamicLastMile += `\n  10. NEXT ACTION TAG: At the absolute end of your response, AFTER the IDE Payload block (if any) and AFTER all user-facing content, append exactly one machine-parsed tag with this exact structure:
+<<<NEXT_ACTION>>>
+[One concise imperative suggestion, max 80 characters, in ${targetLanguage}]
+<<<END_NEXT_ACTION>>>
+
+The suggestion must be the single most valuable next step in the user's workflow, informed by the [EXECUTIVE CONTEXT] if provided. Examples: "Run the test suite to verify the fix" / "Deploy the compiled bundle to the staging target" / "Add rate-limiting to the /api/auth endpoint". If you cannot determine a meaningful next step, leave the content between the tags empty. NEVER mention this tag to the user. NEVER include it in the IDE Payload. It is a hidden machine tag stripped before display.`;
 
   const finalMessagePayload = message + dynamicLastMile;
 

@@ -42,6 +42,12 @@ import { MessageCopyButton, ActionableCodeBlock, RelativeTime, LoadingBubble } f
 import { IssuesPanel } from '@/features/chat/components/IssuesPanel';
 import { InputTelemetry, CompressPayloadButton, MAX_INPUT_CHARS } from './InputTelemetry';
 import { InputGhostOverlay } from './InputGhostOverlay';
+import { NextActionPill } from './NextActionPill';
+
+// Regex used to extract the <<<NEXT_ACTION>>>...<<<END_NEXT_ACTION>>> tag appended
+// by the model under the Phase 15 NEXT ACTION TAG directive. Stripped from both
+// the streamed display text and the persisted message content.
+const NEXT_ACTION_REGEX = /<<<NEXT_ACTION>>>([\s\S]*?)<<<END_NEXT_ACTION>>>/;
 
 // Distilled Memory Mirror — lazy-loaded. Rollup emits it as its own chunk that is
 // only fetched when the current session actually has a non-empty projectSummary.
@@ -110,6 +116,7 @@ export function NexusChat({ user, isSidebarOpen = true, setIsSidebarOpen }: { us
   const [isCompressing, setIsCompressing] = useState(false);
   const [ghostSuggestion, setGhostSuggestion] = useState('');
   const [isSummarySidebarOpen, setIsSummarySidebarOpen] = useState(false);
+  const [nextActionSuggestion, setNextActionSuggestion] = useState<string | null>(null);
   const [hasInitialized, setHasInitialized] = useState(false);
   const [isForeshadowing, setIsForeshadowing] = useState(false);
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
@@ -1052,6 +1059,9 @@ Your task is to proactively initiate the conversation.
       clearFiles();
       setActiveTool(null);
     }
+    // A new turn is about to fire — dismiss any prior proactive suggestion so
+    // the pill doesn't linger while the model generates a fresh one.
+    setNextActionSuggestion(null);
     setIsLoading(true);
 
     let targetSessionId = sessionId;
@@ -1283,6 +1293,7 @@ Your task is to proactively initiate the conversation.
           githubRepo: activeSettingsData.githubRepo || '',
           sparksContext: '',
           projectSummary: activeSettingsData.projectSummary || '',
+          longTermMemory: activeSettingsData.longTermMemory || '',
           issuesScratchpad: activeSettingsData.issuesScratchpad || [],
           distilledMemories
         };
@@ -1328,13 +1339,19 @@ Your task is to proactively initiate the conversation.
 
         const flushInterval = setInterval(() => {
           if (pendingBuffer.length > 0) {
-            const charsToPull = pendingBuffer.substring(0, 3); 
+            const charsToPull = pendingBuffer.substring(0, 3);
             pendingBuffer = pendingBuffer.substring(3);
             displayedText += charsToPull;
 
+            // Strip the NEXT_ACTION tag (and anything after it) from the text
+            // the user sees during streaming. The tag always sits at the end of
+            // the response per the Phase-15 directive — splitting on the opening
+            // marker cleanly hides it the moment it starts arriving.
+            const visibleText = displayedText.split('<<<NEXT_ACTION>>>')[0];
+
             setMessages(prevMessages =>
               prevMessages.map(msg =>
-                msg.id === aiMsgId ? { ...msg, content: displayedText } : msg
+                msg.id === aiMsgId ? { ...msg, content: visibleText } : msg
               )
             );
           } else if (isNetworkDone) {
@@ -1398,7 +1415,19 @@ Your task is to proactively initiate the conversation.
         });
 
         const needsImmediateSync = fullResponse.includes('[SYNC_SCRATCHPAD]');
-        let cleanResponse = fullResponse.replace(/\[SYNC_SCRATCHPAD\]/g, '').trim();
+        // Extract the Phase-15 Next Action tag before stripping it from the user-
+        // visible content. The tag is parsed, its content bound to transient state
+        // (displayed as a clickable pill above the input), and fully removed from
+        // what gets persisted to Firestore.
+        const nextActionMatch = fullResponse.match(NEXT_ACTION_REGEX);
+        const extractedNextAction = nextActionMatch ? nextActionMatch[1].trim() : '';
+        if (extractedNextAction) {
+          setNextActionSuggestion(extractedNextAction);
+        }
+        let cleanResponse = fullResponse
+          .replace(/\[SYNC_SCRATCHPAD\]/g, '')
+          .replace(NEXT_ACTION_REGEX, '')
+          .trim();
         
         if (cleanResponse.length > MAX_FIRESTORE_CHARS) {
             cleanResponse = cleanResponse.substring(0, MAX_FIRESTORE_CHARS) + '\n\n[SYSTEM WARNING: AI Response truncated. Exceeded 1MB database limit.]';
@@ -1445,7 +1474,17 @@ Your task is to proactively initiate the conversation.
       }
 
       const needsImmediateSync = fullResponse.includes('[SYNC_SCRATCHPAD]');
-      let cleanResponse = fullResponse.replace(/\[SYNC_SCRATCHPAD\]/g, '').trim();
+      // Phase-15 Next Action tag extraction for the non-streaming path (slash
+      // commands, file analysis, etc.). Same parse + strip as the streaming path.
+      const nonStreamNextActionMatch = fullResponse.match(NEXT_ACTION_REGEX);
+      const nonStreamNextAction = nonStreamNextActionMatch ? nonStreamNextActionMatch[1].trim() : '';
+      if (nonStreamNextAction) {
+        setNextActionSuggestion(nonStreamNextAction);
+      }
+      let cleanResponse = fullResponse
+        .replace(/\[SYNC_SCRATCHPAD\]/g, '')
+        .replace(NEXT_ACTION_REGEX, '')
+        .trim();
 
       if (cleanResponse.length > MAX_FIRESTORE_CHARS) {
           cleanResponse = cleanResponse.substring(0, MAX_FIRESTORE_CHARS) + '\n\n[SYSTEM WARNING: AI Response truncated. Exceeded 1MB database limit.]';
@@ -2340,6 +2379,21 @@ Your task is to proactively initiate the conversation.
                 </button>
               </div>
             )}
+            {/* Phase 15 — Proactive Next Action pill. Renders above the input only
+                when the most recent AI response yielded a non-empty suggestion.
+                Clicking populates the user-note input and dismisses the pill. */}
+            {nextActionSuggestion && activeTab === 'user' && (
+              <NextActionPill
+                suggestion={nextActionSuggestion}
+                isArabic={!!globalDefaults?.userLang?.startsWith('ar')}
+                onClick={() => {
+                  setInput(nextActionSuggestion);
+                  setNextActionSuggestion(null);
+                  // Focus the textarea so the user can immediately refine or press Enter.
+                  setTimeout(() => textareaRef.current?.focus(), 0);
+                }}
+              />
+            )}
             {/* Phase 10 — Input telemetry + compress button. The wrapper row only
                 mounts once the active input crosses 50% of the 90k limit; the
                 CompressPayloadButton itself mounts at 80% per its internal gate. */}
@@ -2403,7 +2457,16 @@ Your task is to proactively initiate the conversation.
               dir={i18n.language.startsWith('ar') ? 'rtl' : 'ltr'}
               value={activeTab === 'user' ? input : ideText}
               onPaste={handlePaste}
-              onChange={(e) => activeTab === 'user' ? setInput(e.target.value) : setIdeText(e.target.value)}
+              onChange={(e) => {
+                // Dismiss any active Next Action suggestion the moment the user
+                // starts typing — the pill is transient context, not a modal.
+                if (nextActionSuggestion) setNextActionSuggestion(null);
+                if (activeTab === 'user') {
+                  setInput(e.target.value);
+                } else {
+                  setIdeText(e.target.value);
+                }
+              }}
               onKeyDown={(e) => {
                 // Ghost-text commit: Tab accepts the suggestion when one is visible.
                 if (e.key === 'Tab' && ghostSuggestion && activeTab === 'user') {
