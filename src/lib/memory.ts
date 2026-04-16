@@ -1,5 +1,5 @@
 import { fastTask } from './gemini';
-import { doc, setDoc,  collection, query, where, orderBy, limit, getDocs , Timestamp } from 'firebase/firestore';
+import { doc, setDoc, getDoc, collection, query, where, orderBy, limit, getDocs , Timestamp } from 'firebase/firestore';
 import { db } from './firebase';
 
 export interface Issue {
@@ -49,13 +49,53 @@ CRITICAL RULE: You MUST output ONLY valid JSON using this EXACT schema, with NO 
     // Strip possible code block formatting if hallucinated
     const cleanedJson = responseText.replace(/^```json\n?|```$/gm, '').trim();
     const result = JSON.parse(cleanedJson);
+
+    // Reconciliation: safeguard the LLM output against silent drops.
+    // 1) Any previously-resolved issue missing from the LLM response is re-injected (preserves history).
+    // 2) Any previously-open issue completely omitted by the LLM is re-injected (prevents accidental loss).
+    const llmIssues: Issue[] = Array.isArray(result.issuesScratchpad) ? result.issuesScratchpad : [];
+    const previousIssues: Issue[] = currentIssues || [];
+    const llmIds = new Set(llmIssues.map(i => i.id));
+    const droppedResolved = previousIssues.filter(i => i.status === 'resolved' && !llmIds.has(i.id));
+    const droppedOpen = previousIssues.filter(i => i.status === 'open' && !llmIds.has(i.id));
+    const reconciledIssues: Issue[] = [...llmIssues, ...droppedResolved, ...droppedOpen];
+
     await setDoc(doc(db, 'chatSessions', sessionId), {
       projectSummary: result.projectSummary || currentSummary,
-      issuesScratchpad: result.issuesScratchpad || currentIssues || [],
+      issuesScratchpad: reconciledIssues,
       updatedAt: Timestamp.now()
     }, { merge: true });
     } catch (err) {
     console.error('Failed to compress chat history and issues', err);
+  }
+}
+
+/**
+ * Deterministic state transition for a single issue in a session's scratchpad.
+ * Reads the current `issuesScratchpad`, mutates the entry with matching `issueId`,
+ * and writes the array back with `merge: true`. Reactive `onSnapshot` listeners
+ * in the UI pick up the change automatically — no manual refresh needed.
+ */
+export async function setIssueStatus(
+  sessionId: string,
+  issueId: string,
+  status: 'open' | 'resolved'
+): Promise<void> {
+  try {
+    const sessionRef = doc(db, 'chatSessions', sessionId);
+    const snap = await getDoc(sessionRef);
+    const current: Issue[] = (snap.data()?.issuesScratchpad as Issue[]) || [];
+    const updated = current.map(i => (i.id === issueId ? { ...i, status } : i));
+    await setDoc(
+      sessionRef,
+      {
+        issuesScratchpad: updated,
+        updatedAt: Timestamp.now()
+      },
+      { merge: true }
+    );
+  } catch (err) {
+    console.error('Failed to update issue status', err);
   }
 }
 

@@ -1,17 +1,28 @@
-import { Bug, CheckCircle2, CircleDashed, TerminalSquare, AlertCircle } from 'lucide-react';
+import { Bug, CheckCircle2, CircleDashed, TerminalSquare, AlertCircle, Check } from 'lucide-react';
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from '@/components/ui/sheet';
-import { Issue } from '@/lib/memory';
+import { Issue, setIssueStatus } from '@/lib/memory';
 import { useState } from 'react';
 import { useSettings } from '@/contexts/SettingsContext';
 
-export function IssuesPanel({ issues }: { issues: Issue[] }) {
+export function IssuesPanel({ issues, sessionId }: { issues: Issue[]; sessionId: string | null }) {
   const [isOpen, setIsOpen] = useState(false);
+  const [resolvingId, setResolvingId] = useState<string | null>(null);
   const { globalDefaults } = useSettings();
-  
+
   const activeIssues = issues.filter(i => i.status === 'open');
   const resolvedIssues = issues.filter(i => i.status === 'resolved');
-  
+
   const isArabic = globalDefaults?.userLang?.startsWith('ar');
+
+  const handleResolve = async (issueId: string) => {
+    if (!sessionId) return;
+    setResolvingId(issueId);
+    try {
+      await setIssueStatus(sessionId, issueId, 'resolved');
+    } finally {
+      setResolvingId(null);
+    }
+  };
 
   return (
     <Sheet open={isOpen} onOpenChange={setIsOpen}>
@@ -58,6 +69,18 @@ export function IssuesPanel({ issues }: { issues: Issue[] }) {
                             <p className="text-xs text-zinc-400 font-mono leading-relaxed text-start rtl:text-right" dir="ltr">{issue.attemptedFixes}</p>
                           </div>
                         )}
+                        <div className="mt-3 flex justify-end">
+                          <button
+                            type="button"
+                            onClick={() => handleResolve(issue.id)}
+                            disabled={!sessionId || resolvingId === issue.id}
+                            className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-green-400 hover:text-green-300 bg-green-950/30 hover:bg-green-900/40 border border-green-900/50 hover:border-green-800 rounded-lg px-3 py-1.5 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                            aria-label={isArabic ? 'تم الحل' : 'Mark Resolved'}
+                          >
+                            <Check className="w-3 h-3" />
+                            <span>{resolvingId === issue.id ? (isArabic ? 'جارٍ التحديث...' : 'Updating...') : (isArabic ? 'تم الحل' : 'Mark Resolved')}</span>
+                          </button>
+                        </div>
                       </div>
                     </div>
                   </div>

@@ -1579,7 +1579,7 @@ Your task is to proactively initiate the conversation.
                 </Button>
               </div>
             )}
-            <IssuesPanel issues={sessions.find(s => s.id === sessionId)?.issuesScratchpad || []} />
+            <IssuesPanel issues={sessions.find(s => s.id === sessionId)?.issuesScratchpad || []} sessionId={sessionId} />
             <Sheet open={isSparksOpen} onOpenChange={setIsSparksOpen}>
               <SheetTrigger>
                 <div role="button" aria-label="Sparks" className="group relative w-10 h-10 inline-flex items-center justify-center text-muted-foreground hover:text-foreground">
