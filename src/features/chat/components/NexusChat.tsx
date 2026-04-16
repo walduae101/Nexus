@@ -1174,7 +1174,14 @@ Your task is to proactively initiate the conversation.
     } else {
       const { scrollTop, scrollHeight, clientHeight } = scrollRef.current;
       const isNearBottom = scrollHeight - scrollTop - clientHeight < 150;
-      if (!isScrolledUp && (isNearBottom || messages.length <= 50)) { 
+      // Phase-23: if the user is actively drafting in the now-unlocked textarea
+      // during a live stream, do NOT yank the scroll position. This keeps the
+      // text the user is reading / referring to stable beneath their cursor.
+      const userTypingDuringStream =
+        isLoading &&
+        textareaRef.current &&
+        document.activeElement === textareaRef.current;
+      if (!isScrolledUp && !userTypingDuringStream && (isNearBottom || messages.length <= 50)) {
         scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
       }
     }
@@ -2817,7 +2824,7 @@ Your task is to proactively initiate the conversation.
               }}
               placeholder={isForeshadowing ? t('initializing') || 'Nexus is connecting...' : activeTool === 'image' ? 'Describe the image...' : activeTool === 'search' ? 'What do you want to search?' : activeTool === 'tts' ? 'What should I say?' : (activeTab === 'ide' ? (t('ide_payload') || 'Paste IDE Context/Code...') : t('ask_nexus'))} 
               className={`relative bg-transparent border-none text-foreground shadow-none w-full resize-none break-words whitespace-pre-wrap overflow-x-hidden overflow-y-auto py-2 text-start [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none] focus:outline-none focus:ring-0 focus-visible:ring-0 focus-visible:ring-offset-0 focus-visible:outline-none ${activeTab === 'ide' ? 'font-mono text-zinc-300 text-[0.8rem]' : ''} ${isForeshadowing ? 'opacity-50 cursor-not-allowed' : ''}`}
-              disabled={isLoading || isForeshadowing}
+              disabled={isForeshadowing}
               minRows={1}
               maxRows={8}
             />

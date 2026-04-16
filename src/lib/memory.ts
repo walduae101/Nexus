@@ -60,8 +60,11 @@ CRITICAL RULE: You MUST output ONLY valid JSON using this EXACT schema, with NO 
   ],
   "recentResolutions": [
     { "issue_id": "issue-123", "resolution_summary": "One-sentence description of how or when this issue was confirmed fixed in the latest context." }
-  ]
+  ],
+  "detected_tech_stack": ["React", "Vite", "Firebase"]
 }
+
+PHASE-23 TECH STACK DETECTION RULE: Scan the conversation context for explicit mentions of frameworks, languages, runtimes, or infrastructure services (e.g., "React", "Vite", "Firebase", "Python", "PostgreSQL", "Docker", "Tailwind", "TypeScript", "Kubernetes", "Next.js", "Rust", etc.). Output the canonical proper-case name of each unique technology in the "detected_tech_stack" array. Include only technologies the user or prior context has clearly indicated are part of the active project — not hypothetical suggestions. Do NOT include generic concepts ("database", "backend", "UI library"). Keep entries to single product/library names. If nothing new is mentioned in this pass, output an empty array.
 
 PHASE-21 RESOLUTION TELEMETRY RULE: The "recentResolutions" array MUST contain an entry for EVERY issue that transitioned from "open" to "resolved" during THIS compression pass (and ONLY those — do not re-emit issues resolved in prior passes). Each entry's issue_id MUST match the id used in issuesScratchpad. The resolution_summary is a concise user-facing confirmation message (e.g., "Tests passing in the new CI run", "Deploy to staging confirmed healthy"). If no issues transitioned to resolved in this pass, output an empty array: "recentResolutions": [].
 
@@ -115,7 +118,9 @@ Keep status="open" even at high confidence — only transition to "resolved" whe
       }))
       .slice(0, 10);
 
-    const { fs: { doc, setDoc, Timestamp }, fb: { db } } = await loadFirebase();
+    const { fs, fb } = await loadFirebase();
+    const { doc, setDoc, updateDoc, arrayUnion, Timestamp } = fs;
+    const { db } = fb;
     const now = Timestamp.now();
     await setDoc(doc(db, 'chatSessions', sessionId), {
       projectSummary: result.projectSummary || currentSummary,
@@ -129,6 +134,20 @@ Keep status="open" even at high confidence — only transition to "resolved" whe
       recentResolutions,
       updatedAt: now
     }, { merge: true });
+
+    // Phase-23: merge any newly detected tech stack entries into the session's
+    // `techStack` array via arrayUnion (atomic + dedupe-safe). Separate write so
+    // the main summary commit doesn't depend on tech-stack detection succeeding.
+    const rawStack: any[] = Array.isArray(result.detected_tech_stack) ? result.detected_tech_stack : [];
+    const detectedStack = rawStack
+      .filter((s: any) => typeof s === 'string' && s.trim().length > 0 && s.trim().length <= 40)
+      .map((s: any) => String(s).trim())
+      .slice(0, 20);
+    if (detectedStack.length > 0) {
+      updateDoc(doc(db, 'chatSessions', sessionId), {
+        techStack: arrayUnion(...detectedStack)
+      }).catch((err: any) => console.warn('Tech stack merge failed', err));
+    }
     } catch (err) {
     console.error('Failed to compress chat history and issues', err);
   }
