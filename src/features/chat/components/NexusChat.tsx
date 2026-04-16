@@ -5,7 +5,7 @@ import { db, handleFirestoreError, OperationType, storage, auth } from '@/lib/fi
 import { signOut } from 'firebase/auth';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { chatWithNexus, generateImage, searchGrounding, textToSpeech, analyzeMedia, transcribeAudio, fastTask } from '@/lib/gemini';
-import { compressChatHistory, getHistoricalContext, getDistilledMemories, updateLongTermMemory } from '@/lib/memory';
+import { compressChatHistory, getHistoricalContext, getDistilledMemories, updateLongTermMemory, setIssueStatus } from '@/lib/memory';
 import { useSessionPresence } from '@/lib/hooks/useSessionPresence';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -43,7 +43,7 @@ import { IssuesPanel } from '@/features/chat/components/IssuesPanel';
 import { InputTelemetry, CompressPayloadButton, MAX_INPUT_CHARS } from './InputTelemetry';
 import { InputGhostOverlay } from './InputGhostOverlay';
 import { NextActionPill } from './NextActionPill';
-import { ToastStack, type ToastItem } from './ToastNotification';
+import { ToastStack, type ToastItem, type ToastType } from './ToastNotification';
 
 // Regex used to extract the <<<NEXT_ACTION>>>...<<<END_NEXT_ACTION>>> tag appended
 // by the model under the Phase 15 NEXT ACTION TAG directive. Stripped from both
@@ -859,6 +859,17 @@ COMPRESSED OUTPUT:`;
     if (nowMs - (longTermMemoryGenRef.current[sessionId] ?? 0) < 300_000) return;
     longTermMemoryGenRef.current[sessionId] = nowMs;
 
+    // Phase-22: ambient telemetry toast announcing the context archive event.
+    // Fires once per actual dispatch (the cooldown above prevents repeat spam).
+    const isArabicCtx = !!globalDefaults?.userLang?.startsWith('ar');
+    pushToast(
+      'context_shift',
+      isArabicCtx ? 'تمت أرشفة السياق' : 'Context Archived',
+      isArabicCtx
+        ? 'تم ضغط الرسائل الأقدم في الذاكرة طويلة المدى.'
+        : 'Older turns folded into long-term memory — context optimized.'
+    );
+
     updateLongTermMemory(
       sessionId,
       existingSummary,
@@ -870,9 +881,22 @@ COMPRESSED OUTPUT:`;
     ).catch((err) => {
       console.error('Long-term memory dispatch failed:', err);
     });
-  }, [sessionId, messages, sessions, user, effectiveWindowSize]);
+  }, [sessionId, messages, sessions, user, effectiveWindowSize, globalDefaults]);
 
-  // Phase-21: detect newly-resolved issues and surface a transient toast.
+  // Phase-22 unified toast router. All transient alerts (resolution, next-action,
+  // context-shift) flow through this single dispatch, so the ToastStack remains
+  // the only transient-UI surface. Generates a unique id + appends to state.
+  const pushToast = (
+    type: ToastType,
+    title: string,
+    description?: string,
+    resolutionContext?: { sessionId: string; issueId: string }
+  ) => {
+    const id = `toast-${type}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    setToasts(prev => [...prev, { id, type, title, description, resolutionContext }]);
+  };
+
+  // Phase-21/22: detect newly-resolved issues and surface a transient toast.
   // Tracks shown `issue_id`s per session — first observation of a session
   // seeds the set without toasting (avoids flooding on reload), then each
   // subsequent pass surfaces only IDs that weren't already shown.
@@ -887,8 +911,6 @@ COMPRESSED OUTPUT:`;
     ) ? (currentSession as any).recentResolutions : [];
 
     if (!shownResolutionIdsRef.current.has(sessionId)) {
-      // First observation for this session — seed the shown set with current
-      // entries so we don't toast already-known resolutions on reload.
       shownResolutionIdsRef.current.set(sessionId, new Set(resolutions.map(r => r.issue_id)));
       return;
     }
@@ -899,15 +921,63 @@ COMPRESSED OUTPUT:`;
     resolutions.forEach(r => {
       if (shown.has(r.issue_id)) return;
       shown.add(r.issue_id);
-      const id = `toast-${sessionId}-${r.issue_id}-${Date.now()}`;
-      const title = isArabic ? 'تم وضع علامة على المشكلة تلقائياً كمُصلحة' : 'Issue Automatically Marked as Fixed';
-      setToasts(prev => [...prev, { id, title, description: r.resolution_summary || undefined }]);
+      pushToast(
+        'resolution',
+        isArabic ? 'تم وضع علامة على المشكلة تلقائياً كمُصلحة' : 'Issue Automatically Marked as Fixed',
+        r.resolution_summary || undefined,
+        { sessionId, issueId: r.issue_id }
+      );
     });
   }, [sessionId, sessions, globalDefaults]);
 
   const dismissToast = (id: string) => {
     setToasts(prev => prev.filter(t => t.id !== id));
   };
+
+  // Phase-22 undo pipeline for misclassified resolutions. Triggered when the
+  // user clicks "Undo" on a `resolution` toast. Three synchronised actions:
+  //   1. Flip the issue status in `issuesScratchpad` back to `open` via the
+  //      Phase-8 setIssueStatus helper (also strips any stale resolutionConfidence).
+  //   2. Strip the resolution entry from the session doc's `recentResolutions`
+  //      array so the diff effect doesn't re-fire the toast on the next
+  //      snapshot.
+  //   3. Remove the id from the session's shown set so a LEGITIMATE future
+  //      resolution detection can surface a toast again.
+  const handleToastAction = async (toast: ToastItem) => {
+    if (toast.type !== 'resolution' || !toast.resolutionContext) return;
+    const { sessionId: sid, issueId } = toast.resolutionContext;
+    try {
+      await setIssueStatus(sid, issueId, 'open');
+      const sessionDoc = sessions.find((s: any) => s.id === sid);
+      const current: Array<{ issue_id: string; resolution_summary: string }> =
+        (sessionDoc as any)?.recentResolutions || [];
+      const filtered = current.filter(r => r.issue_id !== issueId);
+      await updateDoc(doc(db, 'chatSessions', sid), { recentResolutions: filtered });
+      shownResolutionIdsRef.current.get(sid)?.delete(issueId);
+    } catch (err) {
+      console.error('Undo resolution failed', err);
+    }
+  };
+
+  // Phase-22: fire a toast whenever a new Next Action becomes available.
+  // Deduplicates against the previous suggestion ref so identical subsequent
+  // responses don't re-toast (common when the model suggests the same next step
+  // for two related turns).
+  const lastToastedNextActionRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!nextActionSuggestion) {
+      lastToastedNextActionRef.current = null;
+      return;
+    }
+    if (lastToastedNextActionRef.current === nextActionSuggestion) return;
+    lastToastedNextActionRef.current = nextActionSuggestion;
+    const isArabic = !!globalDefaults?.userLang?.startsWith('ar');
+    pushToast(
+      'next_action',
+      isArabic ? 'اقتراح جاهز للتنفيذ' : 'New suggestion available',
+      nextActionSuggestion.length > 80 ? `${nextActionSuggestion.slice(0, 77)}…` : nextActionSuggestion
+    );
+  }, [nextActionSuggestion, globalDefaults]);
 
   // Distilled Memory freshness check — evaluates whether the current session's
   // projectSummary is stale relative to the most recent interaction and, if so,
@@ -2792,6 +2862,7 @@ Your task is to proactively initiate the conversation.
       <ToastStack
         toasts={toasts}
         onDismiss={dismissToast}
+        onAction={handleToastAction}
         isArabic={!!globalDefaults?.userLang?.startsWith('ar')}
       />
     </div>
