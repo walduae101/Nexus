@@ -2,6 +2,14 @@
   "projects": {
     "default": "coolwtf"
   },
-  "targets": {},
+  "targets": {
+    "coolwtf": {
+      "hosting": {
+        "default": [
+          "nexus-coolwtf"
+        ]
+      }
+    }
+  },
   "etags": {}
 }
