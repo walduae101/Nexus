@@ -1,27 +1,8 @@
-import { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Terminal, Check } from 'lucide-react';
 
-export function DualModeIntroModal() {
+export function DualModeIntroModal({ onClose }: { onClose: () => void }) {
   const { t } = useTranslation();
-  const [isOpen, setIsOpen] = useState(false);
-
-  useEffect(() => {
-    // Check if this modal was seen
-    const hasSeen = localStorage.getItem('nexus_dual_mode_intro_seen');
-    if (!hasSeen) {
-      // Show it slightly after load
-      const timer = setTimeout(() => setIsOpen(true), 1200);
-      return () => clearTimeout(timer);
-    }
-  }, []);
-
-  const handleClose = () => {
-    localStorage.setItem('nexus_dual_mode_intro_seen', 'true');
-    setIsOpen(false);
-  };
-
-  if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-background/80 backdrop-blur-sm p-4" dir={t('dual_intro_title').match(/[\u0600-\u06FF]/) ? 'rtl' : 'ltr'}>
@@ -49,8 +30,8 @@ export function DualModeIntroModal() {
           ))}
         </ul>
         
-        <button 
-          onClick={handleClose}
+        <button
+          onClick={onClose}
           className="w-full py-3 rounded-xl bg-primary text-primary-foreground font-semibold hover:bg-primary/90 transition-colors shadow-lg shadow-primary/20"
         >
           {t('dual_intro_btn') || 'Awesome, let\'s code!'}

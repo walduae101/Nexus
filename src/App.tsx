@@ -3,21 +3,15 @@ import type { User } from 'firebase/auth';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { LogOut, Globe, PanelLeftClose, PanelLeftOpen } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger} from "@/components/ui/dropdown-menu";
 
 import { SettingsProvider, useSettings } from '@/contexts/SettingsContext';
-import { DualModeIntroModal } from '@/features/chat/components/DualModeIntroModal';
-import { ReleaseNotesModal } from '@/components/ReleaseNotesModal';
 import { TooltipProvider } from '@/components/ui/tooltip';
 
 // Firebase vendor code, onboarding, sparks, and the entire NexusChat feature tree
 // all load via dynamic imports — Rollup isolates them into separate async chunks.
+// Transient intro modals (DualMode, ReleaseNotes, SparksIntro) defer until their
+// localStorage-gated visibility flags fire, keeping first-paint lean.
 const NexusChat = lazy(() =>
   import('@/features/chat/components/NexusChat').then(m => ({ default: m.NexusChat }))
 );
@@ -26,6 +20,12 @@ const OnboardingWizard = lazy(() =>
 );
 const SparksIntroModal = lazy(() =>
   import('@/features/sparks/components/SparksIntroModal').then(m => ({ default: m.SparksIntroModal }))
+);
+const DualModeIntroModal = lazy(() =>
+  import('@/features/chat/components/DualModeIntroModal').then(m => ({ default: m.DualModeIntroModal }))
+);
+const ReleaseNotesModal = lazy(() =>
+  import('@/components/ReleaseNotesModal').then(m => ({ default: m.ReleaseNotesModal }))
 );
 
 function AppContent() {
@@ -123,18 +123,42 @@ function AppContent() {
 function NexusWorkspace({ user, isSidebarOpen, setIsSidebarOpen, signOut, auth, t, i18n }: any) {
   const { globalDefaults } = useSettings();
   const [showSparks, setShowSparks] = useState(false);
+  const [showDualMode, setShowDualMode] = useState(false);
+  const [showReleaseNotes, setShowReleaseNotes] = useState(false);
 
   useEffect(() => {
-    const hasSeen = localStorage.getItem('nexus_sparks_intro_seen');
-    if (!hasSeen) {
+    if (!localStorage.getItem('nexus_sparks_intro_seen')) {
       const timer = setTimeout(() => setShowSparks(true), 1500);
       return () => clearTimeout(timer);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!localStorage.getItem('nexus_dual_mode_intro_seen')) {
+      const timer = setTimeout(() => setShowDualMode(true), 1200);
+      return () => clearTimeout(timer);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!localStorage.getItem('nexus_v1_release_notes')) {
+      setShowReleaseNotes(true);
     }
   }, []);
 
   const handleSparksClose = () => {
     localStorage.setItem('nexus_sparks_intro_seen', 'true');
     setShowSparks(false);
+  };
+
+  const handleDualModeClose = () => {
+    localStorage.setItem('nexus_dual_mode_intro_seen', 'true');
+    setShowDualMode(false);
+  };
+
+  const handleReleaseNotesClose = () => {
+    localStorage.setItem('nexus_v1_release_notes', 'true');
+    setShowReleaseNotes(false);
   };
 
   const sizeClass = globalDefaults?.fontSize === 'small' ? 'text-sm' : globalDefaults?.fontSize === 'large' ? 'text-lg' : 'text-base';
@@ -150,13 +174,21 @@ function NexusWorkspace({ user, isSidebarOpen, setIsSidebarOpen, signOut, auth, 
       <div className="flex h-full bg-background text-foreground overflow-hidden">
         <div className="flex flex-col w-full h-full max-w-7xl mx-auto">
           <main className="flex-1 overflow-hidden flex flex-col relative">
-            <ReleaseNotesModal />
+            {showReleaseNotes && (
+              <Suspense fallback={null}>
+                <ReleaseNotesModal onClose={handleReleaseNotesClose} />
+              </Suspense>
+            )}
             {showSparks && (
               <Suspense fallback={null}>
                 <SparksIntroModal onClose={handleSparksClose} />
               </Suspense>
             )}
-            <DualModeIntroModal />
+            {showDualMode && (
+              <Suspense fallback={null}>
+                <DualModeIntroModal onClose={handleDualModeClose} />
+              </Suspense>
+            )}
             <div className="flex-1 overflow-hidden flex flex-col bg-background">
               <Suspense fallback={<div className="flex-1 flex items-center justify-center text-muted-foreground text-sm">Loading workspace...</div>}>
                 <NexusChat user={user} isSidebarOpen={isSidebarOpen} setIsSidebarOpen={setIsSidebarOpen} />

@@ -1,23 +1,8 @@
-import { useState, useEffect } from 'react';
 import { Bug, BrainCircuit, Search, MessageSquare, MousePointer2, RotateCw, Sparkles, X } from 'lucide-react';
 import { useSettings } from '@/contexts/SettingsContext';
 
-export function ReleaseNotesModal() {
-  const [isOpen, setIsOpen] = useState(false);
+export function ReleaseNotesModal({ onClose }: { onClose: () => void }) {
   const { globalDefaults } = useSettings();
-
-  useEffect(() => {
-    const hasSeen = localStorage.getItem('nexus_v1_release_notes');
-    if (!hasSeen) setIsOpen(true);
-  }, []);
-
-  const handleDismiss = () => {
-    localStorage.setItem('nexus_v1_release_notes', 'true');
-    setIsOpen(false);
-  };
-
-  if (!isOpen) return null;
-
   const isArabic = globalDefaults?.userLang?.startsWith('ar');
 
   const features = [
@@ -58,7 +43,7 @@ export function ReleaseNotesModal() {
       {/* Backdrop */}
       <div 
         className="absolute inset-0 bg-black/80 backdrop-blur-sm" 
-        onClick={handleDismiss}
+        onClick={onClose}
       />
       
       {/* Modal Content */}
@@ -80,7 +65,7 @@ export function ReleaseNotesModal() {
             </div>
           </div>
           <button 
-            onClick={handleDismiss}
+            onClick={onClose}
             className={`text-zinc-500 hover:text-zinc-300 transition-colors ${isArabic ? 'me-auto ms-0' : ''}`}
           >
             <X className="w-5 h-5" />
@@ -113,7 +98,7 @@ export function ReleaseNotesModal() {
         {/* Footer */}
         <div className={`p-5 bg-zinc-900/30 flex ${isArabic ? 'justify-start' : 'justify-end'}`}>
           <button 
-            onClick={handleDismiss}
+            onClick={onClose}
             className="bg-primary hover:bg-primary/90 text-primary-foreground focus:ring-4 focus:ring-primary/20 font-medium py-2.5 px-6 rounded-lg transition-all shadow-lg flex items-center gap-2"
           >
             {isArabic ? "فهمت، ابدأ التشغيل" : "Acknowledge & Initialize"}
